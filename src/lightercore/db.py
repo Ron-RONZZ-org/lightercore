@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import sqlite3
 import threading
+import weakref
 from pathlib import Path
 from typing import Any
 
@@ -32,12 +33,20 @@ class LighterbirdDB:
 
     Within a single thread, the connection is lazily created on first use
     and reused for subsequent queries.
+
+    Connections are automatically closed via ``weakref.finalize`` when
+    the ``LighterbirdDB`` instance is garbage-collected.  This prevents
+    ``ResourceWarning: unclosed database`` in long-running processes
+    and test suites.  For connections that live on a different thread
+    (where the finalizer cannot reach them), the per-thread cache is
+    reclaimed when that thread terminates.
     """
 
     def __init__(self, path: str | Path) -> None:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._local = threading.local()
+        weakref.finalize(self, LighterbirdDB.close, self)
 
     # ── Connection management ──────────────────────────────────────────
 
