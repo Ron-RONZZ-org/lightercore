@@ -21,9 +21,16 @@ _SENTINEL_NAME = ".lighterbird-protected"
 
 
 def _base() -> Path | None:
-    """Return the base directory from ``LIGHTERCORE_DIR`` env var, or None."""
-    val = os.environ.get(_LIGHTERCORE_DIR_ENV, "").strip()
-    return Path(val).resolve() if val else None
+    """Return the base directory from env var, or None.
+
+    Checks (in order): ``LIGHTERCORE_DIR``, ``LIGHTERBIRD_DIR``,
+    ``SEMANTIKA_DIR``.
+    """
+    for var in ("LIGHTERCORE_DIR", "LIGHTERBIRD_DIR", "SEMANTIKA_DIR"):
+        val = os.environ.get(var, "").strip()
+        if val:
+            return Path(val).resolve()
+    return None
 
 
 def data_dir() -> Path:

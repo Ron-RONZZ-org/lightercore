@@ -41,8 +41,15 @@ class CRUDService:
 
     # ── Hooks (override in subclass) ───────────────────────────────────
 
-    def _post_create(self, data: dict[str, Any]) -> None:
-        """Called after successful create."""
+    def _post_create(self, data: dict[str, Any], result: dict[str, Any]) -> None:
+        """Called after successful create.
+
+        Args:
+            data: Original data dict passed to ``create()``.
+            result: Copy of the saved data dict (includes auto-generated
+                    UUID and timestamps). Subclasses may modify *result*
+                    before it is returned to the caller.
+        """
 
     def _post_update(self, pk: str, old_data: dict[str, Any] | None, new_data: dict[str, Any]) -> None:
         """Called after successful update."""
@@ -84,6 +91,9 @@ class CRUDService:
             (f"{prefix}%", limit),
         )
 
+    # Backward-compatible alias
+    find_by_uuid_prefix = find_by_pk_prefix
+
     def count(self) -> int:
         """Return the number of entries in the table."""
         row = self.db.execute_one(f"SELECT COUNT(*) AS cnt FROM {self.table}")
@@ -108,7 +118,9 @@ class CRUDService:
     def create(self, data: dict[str, Any]) -> dict[str, Any]:
         """Create a new entry with auto-generated UUID and timestamps.
 
-        *data* is copied so the caller's dict is not mutated.
+        Keys starting with ``_`` are treated as internal/hook-only and
+        are NOT written to the database table. They remain accessible
+        to ``_post_create`` for side-effects.
         """
         ts = now()
         data = dict(data)
@@ -116,9 +128,9 @@ class CRUDService:
         data.setdefault("created_at", ts)
         data["updated_at"] = ts
 
-        columns = list(data.keys())
-        placeholders = ", ".join(["?"] * len(columns))
+        columns = [k for k in data.keys() if not k.startswith("_")]
         values = [data[k] for k in columns]
+        placeholders = ", ".join(["?"] * len(columns))
 
         with self.db.transaction() as conn:
             conn.execute(
@@ -126,8 +138,9 @@ class CRUDService:
                 values,
             )
 
-        self._post_create(data)
-        return data
+        result = data.copy()
+        self._post_create(data, result)
+        return result
 
     def update(self, pk: str, data: dict[str, Any]) -> dict[str, Any] | None:
         """Update an entry, preserving creation timestamp.

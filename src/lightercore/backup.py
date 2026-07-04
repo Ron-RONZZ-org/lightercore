@@ -41,6 +41,7 @@ from lightercore.paths import config_dir, data_dir
 
 _BACKUP_SUBDIR = ".backups"
 _CONFIG_FILENAME = "backup.json"
+_CONFIG_VERSION = 3
 _DEFAULT_MAX_COPIES = 10
 
 
@@ -73,6 +74,83 @@ class BackupTarget:
         return f"BackupTarget({self.path.name}, category={self.category})"
 
 
+class BackupStrategy:
+    """A named backup policy.
+
+    Attributes:
+        id: Unique kebab-case identifier (e.g. ``"daily"``, ``"hourly"``).
+        label: Human-readable name for display.
+        interval_minutes: How often to auto-backup in minutes.
+            0 means on-demand (only via ``!backup now``).
+        max_copies: Maximum number of backups to keep per database stem.
+        target: ``"local"`` (default backup dir) or an absolute path to
+            an external/synced directory.
+        enabled: Whether this strategy is active.
+        last_backup_at: ISO-8601 timestamp of the last successful backup,
+            or empty string if never backed up.
+    """
+
+    def __init__(
+        self,
+        id: str,
+        label: str = "",
+        interval_minutes: int = 0,
+        max_copies: int = _DEFAULT_MAX_COPIES,
+        target: str = "local",
+        enabled: bool = True,
+        last_backup_at: str = "",
+    ) -> None:
+        self.id = id
+        self.label = label or id
+        self.interval_minutes = interval_minutes
+        self.max_copies = max_copies
+        self.target = target
+        self.enabled = enabled
+        self.last_backup_at = last_backup_at
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "label": self.label,
+            "enabled": self.enabled,
+            "interval_minutes": self.interval_minutes,
+            "max_copies": self.max_copies,
+            "target": self.target,
+            "last_backup_at": self.last_backup_at,
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> BackupStrategy:
+        return cls(
+            id=d.get("id", ""),
+            label=d.get("label", ""),
+            interval_minutes=d.get("interval_minutes", 0),
+            max_copies=d.get("max_copies", _DEFAULT_MAX_COPIES),
+            target=d.get("target", "local"),
+            enabled=d.get("enabled", True),
+            last_backup_at=d.get("last_backup_at", ""),
+        )
+
+
+def resolve_target_path(strategy: dict[str, Any]) -> str:
+    """Resolve a strategy's target to an absolute path.
+
+    ``"local"`` is resolved to the default backup directory.
+    """
+    target = strategy.get("target", "local")
+    if target == "local" or not target:
+        return str(_backup_dir())
+    return str(Path(target).expanduser().resolve())
+
+
+def get_strategy(strategy_id: str) -> dict[str, Any] | None:
+    """Return a single strategy dict by id, or ``None``."""
+    for s in list_strategies():
+        if s["id"] == strategy_id:
+            return s
+    return None
+
+
 # ── Internal helpers ──────────────────────────────────────────────────────
 
 
@@ -94,9 +172,9 @@ def _timestamp() -> str:
     Format: ``YYYYMMDDTHHMMSSuuuuuu`` — no colons, spaces, or dots,
     so it is safe for filenames.
     """
-    secs = time.time()
     nsec = time.time_ns()
-    return time.strftime("%Y%m%dT%H%M%S", time.gmtime(secs)) + f"{nsec // 1000:06d}"
+    usec = (nsec // 1000) % 1_000_000
+    return time.strftime("%Y%m%dT%H%M%S", time.gmtime(nsec / 1_000_000_000)) + f"{usec:06d}"
 
 
 def _sha256(path: Path) -> str:
@@ -140,6 +218,15 @@ def _checkpoint_db(db_path: Path) -> None:
         conn.close()
     except sqlite3.Error:
         pass  # best-effort
+
+
+def _checkpoint_known_dbs(db_dir: Path | None = None) -> None:
+    """Checkpoint all discovered databases before backup.
+
+    Flushes WAL → main DB for every ``.db`` file found in *db_dir*.
+    """
+    for db_path in _known_db_paths(db_dir):
+        _checkpoint_db(db_path)
 
 
 # ── DB discovery ───────────────────────────────────────────────────────────
@@ -237,37 +324,46 @@ def _save_raw_config(cfg: dict[str, Any]) -> None:
 
 def _migrate_config(raw: dict[str, Any]) -> dict[str, Any]:
     """Migrate older config formats to the current strategy-based format."""
+    # Strip unknown top-level keys, keeping only allowed ones
+    allowed = {"version", "strategies", "external_dir", "retention",
+               "interval_minutes", "last_backup_at"}
+    cleaned = {k: v for k, v in raw.items() if k in allowed}
+
     # v1: flat config with optional external_dir
-    if "strategies" not in raw:
-        ext_dir = raw.get("external_dir", "")
-        retention = raw.get("retention", _DEFAULT_MAX_COPIES)
-        raw["strategies"] = [
+    if "strategies" not in cleaned:
+        ext_dir = cleaned.get("external_dir", "")
+        retention = cleaned.get("retention", _DEFAULT_MAX_COPIES)
+        cleaned["strategies"] = [
             {
                 "id": "default",
                 "label": "Default",
                 "enabled": True,
-                "interval_minutes": raw.get("interval_minutes", 0),
+                "interval_minutes": cleaned.get("interval_minutes", 0),
                 "max_copies": int(retention),
                 "target": ext_dir if ext_dir else "local",
             }
         ]
         # Preserve last_backup_at if it exists
-        if raw.get("last_backup_at"):
-            raw["strategies"][0]["last_backup_at"] = raw["last_backup_at"]
-        raw.pop("external_dir", None)
-        raw.pop("interval_minutes", None)
-        raw.pop("last_backup_at", None)
-    return raw
+        if cleaned.get("last_backup_at"):
+            cleaned["strategies"][0]["last_backup_at"] = cleaned["last_backup_at"]
+        cleaned.pop("external_dir", None)
+        cleaned.pop("interval_minutes", None)
+        cleaned.pop("last_backup_at", None)
+        cleaned.pop("retention", None)
+    cleaned.setdefault("version", _CONFIG_VERSION)
+    return cleaned
 
 
 def list_strategies() -> list[dict[str, Any]]:
     """Return the list of configured backup strategies.
 
-    Returns an empty list if no config exists.
+    Returns a default strategy if no config exists.
     """
     raw = _load_raw_config()
     if not raw:
-        return []
+        return [{"id": "default", "label": "Default", "enabled": True,
+                 "interval_minutes": 0, "max_copies": _DEFAULT_MAX_COPIES,
+                 "target": "local", "last_backup_at": ""}]
     raw = _migrate_config(raw)
     return raw.get("strategies", [])
 
@@ -275,17 +371,40 @@ def list_strategies() -> list[dict[str, Any]]:
 def load_config() -> dict[str, Any]:
     """Load the full backup config, migrating if needed.
 
-    Returns a dict with a ``"strategies"`` key (always a list).
+    Returns a dict with ``"version"`` and ``"strategies"`` keys.
     """
     raw = _load_raw_config()
     if not raw:
-        return {"strategies": []}
+        return {
+            "version": _CONFIG_VERSION,
+            "strategies": list_strategies(),
+        }
     return _migrate_config(raw)
 
 
 def save_config(cfg: dict[str, Any]) -> None:
     """Validate and persist the backup config."""
+    seen_ids: set[str] = set()
     for s in cfg.get("strategies", []):
+        # Validate strategy ID: lowercase, kebab-case
+        sid = s.get("id", "")
+        if not re.match(r"^[a-z][a-z0-9-]*$", sid):
+            raise ValueError(
+                f"Strategy ID must match [a-z][a-z0-9-]* (got {sid!r})"
+            )
+        if sid in seen_ids:
+            raise ValueError(f"Duplicate strategy ID: {sid}")
+        seen_ids.add(sid)
+        # Validate max_copies
+        mc = s.get("max_copies", _DEFAULT_MAX_COPIES)
+        if not isinstance(mc, int) or mc < 1:
+            try:
+                mc = int(mc)
+            except (ValueError, TypeError):
+                raise ValueError(
+                    f"max_copies must be a positive integer (got {mc!r})"
+                )
+            s["max_copies"] = mc
         s.setdefault("enabled", True)
         s.setdefault("max_copies", _DEFAULT_MAX_COPIES)
         s.setdefault("target", "local")
@@ -293,7 +412,7 @@ def save_config(cfg: dict[str, Any]) -> None:
 
 
 def add_strategy(
-    strategy_id: str,
+    strategy_id_or_obj: str | BackupStrategy,
     *,
     label: str = "",
     interval_minutes: int = 0,
@@ -301,31 +420,53 @@ def add_strategy(
     target: str = "local",
     enabled: bool = True,
 ) -> dict[str, Any]:
-    """Add a new backup strategy."""
+    """Add a new backup strategy.
+
+    Accepts either a ``BackupStrategy`` object or keyword arguments.
+    """
     cfg = load_config()
-    if any(s["id"] == strategy_id for s in cfg["strategies"]):
-        raise ValueError(f"Strategy '{strategy_id}' already exists")
-    entry: dict[str, Any] = {
-        "id": strategy_id,
-        "label": label or strategy_id,
-        "enabled": enabled,
-        "interval_minutes": interval_minutes,
-        "max_copies": max_copies,
-        "target": target,
-    }
+    if isinstance(strategy_id_or_obj, BackupStrategy):
+        entry = strategy_id_or_obj.to_dict()
+    else:
+        strategy_id = strategy_id_or_obj
+        if any(s["id"] == strategy_id for s in cfg["strategies"]):
+            raise ValueError(f"Strategy '{strategy_id}' already exists")
+        entry = {
+            "id": strategy_id,
+            "label": label or strategy_id,
+            "enabled": enabled,
+            "interval_minutes": interval_minutes,
+            "max_copies": max_copies,
+            "target": target,
+        }
+    if any(s["id"] == entry["id"] for s in cfg["strategies"]):
+        raise ValueError(f"Strategy '{entry['id']}' already exists")
     cfg["strategies"].append(entry)
     save_config(cfg)
     return entry
 
 
-def update_strategy(strategy_id: str, **updates: Any) -> dict[str, Any] | None:
-    """Update fields on an existing strategy."""
+def update_strategy(
+    strategy_id: str,
+    *updates_dict: dict[str, Any],
+    **updates: Any,
+) -> dict[str, Any] | None:
+    """Update fields on an existing strategy.
+
+    Accepts either keyword arguments or a single dict (backward-compat).
+    """
+    # Merge positional dict and keyword args
+    all_updates: dict[str, Any] = {}
+    if updates_dict:
+        all_updates.update(updates_dict[0])
+    all_updates.update(updates)
+
     cfg = load_config()
     for s in cfg["strategies"]:
         if s["id"] == strategy_id:
             for key in ("label", "enabled", "interval_minutes", "max_copies", "target"):
-                if key in updates:
-                    s[key] = updates[key]
+                if key in all_updates:
+                    s[key] = all_updates[key]
             save_config(cfg)
             return s
     return None
@@ -494,12 +635,20 @@ def backup_database(
     db_path: Path,
     *,
     strategy: dict[str, Any] | None = None,
+    retention: int | None = None,
 ) -> Path | None:
     """Create a single-DB backup tagged with a strategy (backward-compatible).
 
     This is a convenience wrapper for tools that only manage one database
     (e.g. semantika).  Uses the same strategy-based config system but
     produces a single ``.db`` file.
+
+    Args:
+        db_path: Path to the source database file.
+        strategy: Strategy dict. If ``None``, uses the first enabled
+            strategy or a default.
+        retention: Override max_copies for this backup. Takes precedence
+            over the strategy's ``max_copies`` when set.
 
     Returns:
         Path to the created backup file, or ``None`` if *db_path* does
@@ -524,19 +673,13 @@ def backup_database(
     filename = f"{stem}_{strategy_id}_{ts}.db"
     backup_path = backup_dir / filename
 
-    # Online backup via SQLite's native API for a consistent snapshot
-    dest = sqlite3.connect(str(backup_path))
-    try:
-        src = sqlite3.connect(str(db_path), timeout=5.0)
-        try:
-            src.backup(dest)
-        finally:
-            src.close()
-    finally:
-        dest.close()
+    # Copy with SHA-256 verification (byte-identical)
+    _copy_with_verify(db_path, backup_path)
 
     _copy_to_external(strategy, backup_path)
-    _prune_for_stem_and_strategy(stem, strategy_id, retention=strategy["max_copies"])
+    # retention=0 means "use default" (backward-compat with lighterbird)
+    effective_retention = retention if retention else strategy.get("max_copies", _DEFAULT_MAX_COPIES)
+    _prune_for_stem_and_strategy(stem, strategy_id, retention=effective_retention)
     _update_last_backup(strategy_id)
 
     return backup_path
@@ -629,16 +772,16 @@ def list_backups() -> list[dict[str, Any]]:
     if not bdir.is_dir():
         return []
 
-    # Pattern for "{stem}_{strategy}_{timestamp}.db" (new style)
-    pat = re.compile(r"^(.+?)_([a-z][a-z0-9-]*?)_(\d{8}T\d{15})\.db$")
+    # Pattern for "{stem}_{strategy}_{timestamp}.db" (variable-length timestamp)
+    pat = re.compile(r"^(.+?)_([a-z][a-z0-9-]*?)_(\d{8}T\d{10,})\.db$")
     # Pattern for "backup_{strategy}_{timestamp}.7z" (archive style)
-    arc_pat = re.compile(r"^backup_([a-z][a-z0-9-]*?)_(\d{8}T\d{15})\.7z$")
+    arc_pat = re.compile(r"^backup_([a-z][a-z0-9-]*?)_(\d{8}T\d{10,})\.7z$")
 
     entries: list[dict[str, Any]] = []
     for p in sorted(bdir.iterdir()):
         if p.suffix not in (".db", ".7z"):
             continue
-        m = pat.match(p.stem)
+        m = pat.match(p.name)
         if m:
             entries.append({
                 "path": p,
@@ -649,7 +792,7 @@ def list_backups() -> list[dict[str, Any]]:
                 "modified": datetime.fromtimestamp(p.stat().st_mtime, tz=timezone.utc).isoformat(),
             })
             continue
-        m = arc_pat.match(p.stem)
+        m = arc_pat.match(p.name)
         if m:
             entries.append({
                 "path": p,
@@ -750,7 +893,6 @@ def prune_old_backups(retention: int | None = None) -> int:
     strategies: dict[str, int] = {}
     for s in list_strategies():
         strategies[s["id"]] = s.get("max_copies", _DEFAULT_MAX_COPIES)
-    max_keep = retention or strategies.get("default", _DEFAULT_MAX_COPIES)
 
     groups: dict[str, list[Path]] = {}
     for p in bdir.iterdir():
@@ -758,18 +900,19 @@ def prune_old_backups(retention: int | None = None) -> int:
             continue
         # Group by stem for .db, or by strategy for .7z
         if p.suffix == ".7z":
-            m = re.match(r"^backup_([a-z0-9-]+)_\d{8}T\d{15}\.7z$", p.name)
+            m = re.match(r"^backup_([a-z0-9-]+)_\d{8}T\d{10,}\.7z$", p.name)
             if m:
                 groups.setdefault(f"archive:{m.group(1)}", []).append(p)
         else:
-            m = re.match(r"^(.+?)_([a-z0-9-]+)_\d{8}T\d{15}\.db$", p.name)
+            m = re.match(r"^(.+?)_([a-z0-9-]+)_\d{8}T\d{10,}\.db$", p.name)
             if m:
                 groups.setdefault(f"{m.group(1)}:{m.group(2)}", []).append(p)
 
+    # Use explicit retention if given, otherwise fall back to per-strategy config
     deleted = 0
     for key, files in groups.items():
         strategy_id = key.split(":")[-1] if ":" in key else "default"
-        keep = strategies.get(strategy_id, max_keep)
+        keep = retention if retention is not None else strategies.get(strategy_id, _DEFAULT_MAX_COPIES)
         files.sort(reverse=True)
         for p in files[keep:]:
             try:
@@ -778,6 +921,10 @@ def prune_old_backups(retention: int | None = None) -> int:
             except OSError:
                 pass
     return deleted
+
+
+prune_backups = prune_old_backups
+"""Alias for :func:`prune_old_backups` (backward-compatible name)."""
 
 
 def _prune_archives_for_strategy(strategy_id: str, *, retention: int) -> int:
@@ -987,6 +1134,7 @@ def verify_strategy_target(strategy: dict[str, Any]) -> dict[str, bool | str]:
 
 
 __all__ = [
+    "BackupStrategy",
     "BackupTarget",
     "add_strategy",
     "backup_all",
@@ -995,13 +1143,16 @@ __all__ = [
     "copy_to_external",
     "export_data",
     "get_backup_targets",
+    "get_strategy",
     "import_data",
     "list_backups",
     "list_backups_for",
     "list_strategies",
     "load_config",
+    "prune_backups",
     "prune_old_backups",
     "remove_strategy",
+    "resolve_target_path",
     "restore_by_timestamp",
     "restore_latest",
     "save_config",
