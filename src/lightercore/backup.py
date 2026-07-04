@@ -919,18 +919,20 @@ def import_data(
 
     import tempfile
 
-    with py7zr.SevenZipFile(src, mode="r") as arc:
-        # Extract manifest
-        try:
-            manifest_data = arc.read("manifest.json")
-            manifest = json.loads(manifest_data["manifest.json"].read())
-        except (KeyError, json.JSONDecodeError) as e:
-            raise ValueError(f"Invalid or missing manifest.json: {e}") from e
+    with tempfile.TemporaryDirectory(prefix="lightercore-import-") as tmp:
+        tmp_path = Path(tmp)
 
-        # Extract everything to a temp dir for SHA verification
-        with tempfile.TemporaryDirectory(prefix="lightercore-import-") as tmp:
+        with py7zr.SevenZipFile(src, mode="r") as arc:
             arc.extractall(path=tmp)
-            tmp_path = Path(tmp)
+
+        # Read manifest from extracted files
+        manifest_path = tmp_path / "manifest.json"
+        if not manifest_path.exists():
+            raise ValueError("Export archive missing manifest.json")
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError) as e:
+            raise ValueError(f"Invalid manifest.json: {e}") from e
 
             for rel_path_str, file_info in manifest.get("files", {}).items():
                 src_file = tmp_path / rel_path_str

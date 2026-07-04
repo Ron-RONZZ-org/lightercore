@@ -50,6 +50,21 @@ class AIError(LighterbirdError):
     """LLM provider call failed."""
 
 
+class AmbiguousIDError(LighterbirdError):
+    """Raised when an ID prefix matches multiple entities.
+
+    Useful for CLI interaction — the caller can present the matches
+    to the user for disambiguation.
+
+    Attributes:
+        matches: List of matching entity dicts (for interactive selection).
+    """
+
+    def __init__(self, message: str, matches: list[dict] | None = None) -> None:
+        super().__init__(message)
+        self.matches: list[dict] = matches or []
+
+
 class ProtectedPathError(LighterbirdError):
     """Raised when attempting to delete a protected directory.
 

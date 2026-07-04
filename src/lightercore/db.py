@@ -1,12 +1,17 @@
-"""SQLite database wrapper — WAL mode, per-thread connections, connection pooling.
+"""SQLite database wrapper with WAL mode and per-thread connection caching.
+
+Best-of-both-worlds merge:
+- Lighterbird DB: richer query methods (init_schema, table_exists, get_pragma_table_info),
+  WAL checkpoint on init, auto-commit on execute(), mkdir on init
+- Semantika DB: backup() method using SQLite online backup API
 
 Usage::
 
     from lightercore.db import LighterbirdDB
 
     db = LighterbirdDB(path)
-    for row in db.execute("SELECT * FROM t"):
-        ...
+    db.init_schema({"items": "CREATE TABLE items (uuid TEXT PRIMARY KEY, name TEXT)"})
+    result = db.execute("SELECT * FROM items WHERE uuid LIKE ?", ("abc%",))
 """
 
 from __future__ import annotations
@@ -18,88 +23,137 @@ from typing import Any
 
 
 class LighterbirdDB:
-    """Thread-safe SQLite database with WAL mode and connection caching.
+    """Thread-safe SQLite database with WAL mode and per-thread connections.
 
-    Each thread gets its own connection (``threading.local``).  WAL mode
-    is enabled on the first connection automatically.
+    Connections are cached per-thread via ``threading.local``.
+    Each thread gets its own ``sqlite3.Connection``, avoiding the
+    ``ProgrammingError: SQLite objects created in a thread can only be
+    used in that same thread`` error.
+
+    Within a single thread, the connection is lazily created on first use
+    and reused for subsequent queries.
     """
 
-    def __init__(self, db_path: str | Path) -> None:
-        self._path = str(db_path)
+    def __init__(self, path: str | Path) -> None:
+        self.path = Path(path)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
         self._local = threading.local()
 
     # ── Connection management ──────────────────────────────────────────
 
-    @property
-    def _conn(self) -> sqlite3.Connection:
-        """Get or create a per-thread connection."""
-        if not hasattr(self._local, "conn") or self._local.conn is None:
-            self._local.conn = sqlite3.connect(self._path, timeout=10.0)
-            self._local.conn.row_factory = sqlite3.Row
-            self._local.conn.execute("PRAGMA journal_mode=WAL")
-            self._local.conn.execute("PRAGMA foreign_keys=ON")
-        return self._local.conn
+    def _get_conn(self) -> sqlite3.Connection:
+        """Get or create a per-thread connection with WAL mode."""
+        conn = getattr(self._local, "_conn", None)
+        if conn is None:
+            conn = sqlite3.connect(str(self.path), timeout=10.0)
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA foreign_keys=ON")
+            conn.execute("PRAGMA wal_autocheckpoint=100")
+            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            conn.row_factory = sqlite3.Row
+            self._local._conn = conn
+        return conn
 
     def close(self) -> None:
-        """Close the per-thread connection (if open)."""
-        if hasattr(self._local, "conn") and self._local.conn is not None:
-            self._local.conn.close()
-            self._local.conn = None
+        """Checkpoint WAL and close the calling thread's connection."""
+        conn = getattr(self._local, "_conn", None)
+        if conn is not None:
+            try:
+                conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
+            except Exception:
+                pass
+            try:
+                conn.close()
+            except Exception:
+                pass
+            self._local._conn = None
 
     # ── Query helpers ──────────────────────────────────────────────────
 
     def execute(self, sql: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
-        """Execute a query and return all rows as dicts."""
-        cur = self._conn.execute(sql, params)
-        return [dict(r) for r in cur.fetchall()]
+        """Execute SQL and return results as dicts. Auto-commits."""
+        conn = self._get_conn()
+        cursor = conn.execute(sql, params or ())
+        rows = cursor.fetchall()
+        conn.commit()
+        return [dict(r) for r in rows]
 
     def execute_one(self, sql: str, params: tuple[Any, ...] = ()) -> dict[str, Any] | None:
-        """Execute a query and return the first row as a dict, or ``None``."""
-        cur = self._conn.execute(sql, params)
-        row = cur.fetchone()
-        return dict(row) if row else None
+        """Execute SQL and return first result, or None."""
+        results = self.execute(sql, params)
+        return results[0] if results else None
 
-    def execute_many(self, sql: str, seq: list[tuple[Any, ...]]) -> None:
-        """Execute a parameterised statement for every item in *seq*."""
-        self._conn.executemany(sql, seq)
-        self._conn.commit()
+    def execute_many(self, sql: str, params_list: list[tuple[Any, ...]]) -> None:
+        """Execute SQL with multiple parameter sets. Auto-commits."""
+        conn = self._get_conn()
+        conn.executemany(sql, params_list)
+        conn.commit()
 
     # ── Transactions ───────────────────────────────────────────────────
 
-    @property
-    def in_transaction(self) -> bool:
-        return self._conn.in_transaction
+    def transaction(self):
+        """Context manager yielding a connection with auto-commit/rollback."""
 
-    def transaction(self) -> _Transaction:
-        """Return a context manager for an explicit transaction.
+        class _TransactionContext:
+            def __init__(self, db: LighterbirdDB):
+                self.db = db
 
-        Auto-commits on success, rolls back on exception.
+            def __enter__(self):
+                return self.db._get_conn()
+
+            def __exit__(self, exc_type, exc_val, exc_tb):
+                conn = self.db._get_conn()
+                if exc_type is None:
+                    conn.commit()
+                else:
+                    conn.rollback()
+
+        return _TransactionContext(self)
+
+    # ── Schema helpers ─────────────────────────────────────────────────
+
+    def init_schema(self, schema: dict[str, str]) -> None:
+        """Initialize database tables from a schema dict.
+
+        Args:
+            schema: Mapping of table_name → CREATE TABLE SQL.
+                Tables that already exist are skipped.
         """
-        return _Transaction(self._conn)
+        conn = self._get_conn()
+        for table, sql in schema.items():
+            cursor = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+                (table,),
+            )
+            if cursor.fetchone() is None:
+                conn.executescript(sql)
+        conn.commit()
 
-    def begin(self) -> None:
-        if not self.in_transaction:
-            self._conn.execute("BEGIN")
+    def get_pragma_table_info(self, table: str) -> list[dict[str, Any]]:
+        """Return PRAGMA table_info for a table.
 
-    def commit(self) -> None:
-        self._conn.commit()
+        Returns:
+            List of column dicts with keys: cid, name, type, notnull, dflt_value, pk.
+        """
+        return self.execute(f"PRAGMA table_info({table})")
 
-    def rollback(self) -> None:
-        self._conn.rollback()
+    def table_exists(self, name: str) -> bool:
+        """Check if a table exists in the database."""
+        return self.execute_one(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+            (name,),
+        ) is not None
 
+    # ── Backup ─────────────────────────────────────────────────────────
 
-class _Transaction:
-    """Context manager for explicit transaction control."""
+    def backup(self, dest_path: str | Path) -> None:
+        """Backup the database to *dest_path* using SQLite's online backup API.
 
-    def __init__(self, conn: sqlite3.Connection) -> None:
-        self._conn = conn
-
-    def __enter__(self) -> sqlite3.Connection:
-        self._conn.execute("BEGIN")
-        return self._conn
-
-    def __exit__(self, exc_type: object, exc_val: object, exc_tb: object) -> None:
-        if exc_type is None:
-            self._conn.commit()
-        else:
-            self._conn.rollback()
+        Produces a consistent snapshot even while the database is in use.
+        """
+        dest = sqlite3.connect(str(dest_path))
+        try:
+            conn = self._get_conn()
+            conn.backup(dest)
+        finally:
+            dest.close()

@@ -26,17 +26,6 @@ def _base() -> Path | None:
     return Path(val).resolve() if val else None
 
 
-def _xdg_dir(var: str, default_rel: str) -> Path:
-    """Resolve an XDG directory with env override and ``LIGHTERCORE_DIR`` fallback."""
-    env_val = os.environ.get(var, "").strip()
-    if env_val:
-        return Path(env_val).expanduser().resolve()
-    base = _base()
-    if base:
-        return base / default_rel.split("/")[-1]
-    return Path.home() / ".local" / default_rel
-
-
 def data_dir() -> Path:
     """Return the application data directory.
 
@@ -48,7 +37,13 @@ def data_dir() -> Path:
         override = os.environ.get(env)
         if override:
             return Path(override).expanduser().resolve()
-    return _xdg_dir("XDG_DATA_HOME", "share/lighterbird")
+    base = _base()
+    if base:
+        return base / "data"
+    xdg = os.environ.get("XDG_DATA_HOME", "").strip()
+    if xdg:
+        return Path(xdg).expanduser().resolve() / "lighterbird"
+    return Path.home() / ".local" / "share" / "lighterbird"
 
 
 def config_dir() -> Path:
@@ -61,7 +56,13 @@ def config_dir() -> Path:
         override = os.environ.get(env)
         if override:
             return Path(override).expanduser().resolve()
-    return _xdg_dir("XDG_CONFIG_HOME", "config/lighterbird")
+    base = _base()
+    if base:
+        return base / "config"
+    xdg = os.environ.get("XDG_CONFIG_HOME", "").strip()
+    if xdg:
+        return Path(xdg).expanduser().resolve() / "lighterbird"
+    return Path.home() / ".config" / "lighterbird"
 
 
 def cache_dir() -> Path:
@@ -74,7 +75,13 @@ def cache_dir() -> Path:
         override = os.environ.get(env)
         if override:
             return Path(override).expanduser().resolve()
-    return _xdg_dir("XDG_CACHE_HOME", "cache/lighterbird")
+    base = _base()
+    if base:
+        return base / "cache"
+    xdg = os.environ.get("XDG_CACHE_HOME", "").strip()
+    if xdg:
+        return Path(xdg).expanduser().resolve() / "lighterbird"
+    return Path.home() / ".cache" / "lighterbird"
 
 
 def state_dir() -> Path:
@@ -87,7 +94,13 @@ def state_dir() -> Path:
         override = os.environ.get(env)
         if override:
             return Path(override).expanduser().resolve()
-    return _xdg_dir("XDG_STATE_HOME", "state/lighterbird")
+    base = _base()
+    if base:
+        return base / "state"
+    xdg = os.environ.get("XDG_STATE_HOME", "").strip()
+    if xdg:
+        return Path(xdg).expanduser().resolve() / "lighterbird"
+    return Path.home() / ".local" / "state" / "lighterbird"
 
 
 # ── Sentinel protection ──────────────────────────────────────────────────
