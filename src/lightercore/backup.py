@@ -316,7 +316,9 @@ def _load_raw_config() -> dict[str, Any]:
 
 def _save_raw_config(cfg: dict[str, Any]) -> None:
     """Write the backup config JSON."""
-    _config_path().write_text(
+    cfg_path = _config_path()
+    cfg_path.parent.mkdir(parents=True, exist_ok=True)
+    cfg_path.write_text(
         json.dumps(cfg, indent=2, ensure_ascii=False),
         encoding="utf-8",
     )
@@ -730,12 +732,22 @@ def copy_to_external(
 # ── Public API: Test strategy ─────────────────────────────────────────────
 
 
-def test_strategy(strategy: dict[str, Any]) -> dict[str, bool | str]:
+def test_strategy(
+    strategy: dict[str, Any] | str,
+) -> dict[str, bool | str]:
     """Test a backup strategy by verifying the target is writable.
+
+    Args:
+        strategy: Strategy dict, or a string ID to look up from config.
 
     Returns:
         Dict with keys: ``success``, ``message``, and optionally ``error``.
     """
+    if isinstance(strategy, str):
+        s = get_strategy(strategy)
+        if s is None:
+            return {"success": False, "message": f"Strategy '{strategy}' not found"}
+        strategy = s
     try:
         backup_dir = _backup_dir()
         probe = backup_dir / ".probe"
@@ -1081,46 +1093,46 @@ def import_data(
         except (json.JSONDecodeError, OSError) as e:
             raise ValueError(f"Invalid manifest.json: {e}") from e
 
-            for rel_path_str, file_info in manifest.get("files", {}).items():
-                src_file = tmp_path / rel_path_str
-                if not src_file.exists():
-                    result["errors"].append(f"{rel_path_str} (not found in archive)")
-                    continue
+        for rel_path_str, file_info in manifest.get("files", {}).items():
+            src_file = tmp_path / rel_path_str
+            if not src_file.exists():
+                result["errors"].append(f"{rel_path_str} (not found in archive)")
+                continue
 
-                expected_sha = file_info.get("sha256", "")
-                if expected_sha:
-                    actual_sha = _sha256(src_file)
-                    if actual_sha != expected_sha:
-                        result["errors"].append(
-                            f"{rel_path_str} (SHA-256 mismatch)"
-                        )
-                        if not force:
-                            continue
-
-                if rel_path_str.startswith("config/"):
-                    rel_suffix = rel_path_str[len("config/"):]
-                    dst_file = dst_config / rel_suffix
-                else:
-                    dst_file = dst_data / rel_path_str
-
-                if dst_file.exists() and not force:
-                    try:
-                        if _sha256(dst_file) == _sha256(src_file):
-                            result["skipped"].append(rel_path_str)
-                            continue
-                    except OSError:
-                        pass
-                    result["skipped"].append(
-                        f"{rel_path_str} (exists; use --force to overwrite)"
+            expected_sha = file_info.get("sha256", "")
+            if expected_sha:
+                actual_sha = _sha256(src_file)
+                if actual_sha != expected_sha:
+                    result["errors"].append(
+                        f"{rel_path_str} (SHA-256 mismatch)"
                     )
-                    continue
+                    if not force:
+                        continue
 
+            if rel_path_str.startswith("config/"):
+                rel_suffix = rel_path_str[len("config/"):]
+                dst_file = dst_config / rel_suffix
+            else:
+                dst_file = dst_data / rel_path_str
+
+            if dst_file.exists() and not force:
                 try:
-                    dst_file.parent.mkdir(parents=True, exist_ok=True)
-                    _copy_with_verify(src_file, dst_file)
-                    result["imported"].append(rel_path_str)
-                except OSError as e:
-                    result["errors"].append(f"{rel_path_str} ({e})")
+                    if _sha256(dst_file) == _sha256(src_file):
+                        result["skipped"].append(rel_path_str)
+                        continue
+                except OSError:
+                    pass
+                result["skipped"].append(
+                    f"{rel_path_str} (exists; use --force to overwrite)"
+                )
+                continue
+
+            try:
+                dst_file.parent.mkdir(parents=True, exist_ok=True)
+                _copy_with_verify(src_file, dst_file)
+                result["imported"].append(rel_path_str)
+            except OSError as e:
+                result["errors"].append(f"{rel_path_str} ({e})")
 
     return result
 
@@ -1128,7 +1140,7 @@ def import_data(
 # ── Public API: test strategy ──────────────────────────────────────────────
 
 
-def verify_strategy_target(strategy: dict[str, Any]) -> dict[str, bool | str]:
+def verify_strategy_target(strategy: dict[str, Any] | str) -> dict[str, bool | str]:
     """Alias for :func:`test_strategy`."""
     return test_strategy(strategy)
 
@@ -1160,3 +1172,7 @@ __all__ = [
     "update_strategy",
     "verify_strategy_target",
 ]
+
+def _backup_filename(stem: str, strategy_id: str, ts: str, suffix: str = ".db") -> str:
+    """Build a backup filename from components."""
+    return f"{stem}_{strategy_id}_{ts}{suffix}"

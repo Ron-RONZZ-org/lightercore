@@ -65,10 +65,23 @@ class CRUDService:
         direction: str = "DESC",
         limit: int = 100,
         offset: int = 0,
+        *,
+        desc: bool | None = None,
     ) -> list[dict[str, Any]]:
-        """List entries, optionally ordered and limited."""
+        """List entries, optionally ordered and limited.
+
+        Args:
+            order_by: Column name to sort by (defaults to PK column).
+            direction: ``"ASC"`` or ``"DESC"``.
+            limit: Max rows.
+            offset: Row offset.
+            desc: Backward-compat alias. If ``True``, forces DESC.
+                  If ``False``, forces ASC. Overrides *direction*.
+        """
         if order_by is None:
             order_by = self._pk_column
+        if desc is not None:
+            direction = "DESC" if desc else "ASC"
         return self.db.execute(
             f"SELECT * FROM {self.table} ORDER BY {order_by} {direction} LIMIT ? OFFSET ?",
             (limit, offset),
