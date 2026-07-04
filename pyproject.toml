@@ -1,0 +1,34 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "lightercore"
+version = "0.1.0"
+description = "Shared core library for the 3rd-gen PIM/knowledge-graph toolchain"
+authors = [{name = "Rong ZHOU"}]
+readme = "README.md"
+license = "AGPL-3.0-only"
+requires-python = ">=3.11"
+dependencies = [
+    "py7zr>=0.20.0",
+    "cryptography>=42.0.0",
+    "httpx>=0.27.0",
+    "openai>=1.12.0",
+    "keyring>=25.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-mock>=3.14.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/lightercore"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff.lint]
+select = ["S110", "S112", "E", "F", "I"]
