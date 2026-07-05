@@ -11,6 +11,6 @@ Usage::
     from lightercore.exceptions import LighterbirdError
 """
 
-from lightercore import db, paths, exceptions, backup, crud
+from lightercore import db, paths, exceptions, backup, crud, permissions
 
-__all__ = ["db", "paths", "exceptions", "backup", "crud"]
+__all__ = ["db", "paths", "exceptions", "backup", "crud", "permissions"]

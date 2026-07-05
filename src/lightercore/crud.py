@@ -168,7 +168,7 @@ class CRUDService:
         data = dict(data)
         data["updated_at"] = ts
 
-        columns = [k for k in data.keys()]
+        columns = [k for k in data.keys() if not k.startswith("_")]
         set_clauses = [f"{k} = ?" for k in columns]
         values = [data[k] for k in columns] + [f"{pk}%"]
 
