@@ -12,5 +12,6 @@ Usage::
 """
 
 from lightercore import db, paths, exceptions, backup, crud, permissions
+from lightercore.paths import set_app_name
 
-__all__ = ["db", "paths", "exceptions", "backup", "crud", "permissions"]
+__all__ = ["db", "paths", "exceptions", "backup", "crud", "permissions", "set_app_name"]
