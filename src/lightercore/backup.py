@@ -1036,10 +1036,17 @@ def export_data(
         with py7zr.SevenZipFile(
             arc_path, mode="w", filters=[{"id": py7zr.FILTER_LZMA2}]
         ) as arc:
-            # Write manifest as in-memory entry
-            import io
+            # Write manifest via a temp file so py7zr preserves permissions
+            # (arc.writef with in-memory BytesIO creates 0o000 entries).
+            import tempfile
             manifest_bytes = json.dumps(manifest, indent=2).encode("utf-8")
-            arc.writef(io.BytesIO(manifest_bytes), "manifest.json")
+            with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as mf:
+                mf.write(manifest_bytes)
+                mf_path = mf.name
+            try:
+                arc.write(mf_path, "manifest.json")
+            finally:
+                Path(mf_path).unlink(missing_ok=True)
             for src_path, arc_name in files_to_export:
                 arc.write(src_path, arc_name)
     except Exception as exc:
