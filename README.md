@@ -9,6 +9,7 @@ Provides foundational building blocks for both [lighterbird](https://github.com/
 - **Exceptions** — Structured error hierarchy
 - **CRUD** — Generic CRUD with UUID prefix matching + soft-delete
 - **Backup** — Multi-strategy 7z backup/restore with SHA-256 verification
+- **Permissions** — `PermissionLevel` enum (READ/WRITE/DESTRUCTIVE/SYSTEM), `PermissionError`, and `ConfirmationProtocol` for LLM command safety
 
 ## Installation
 

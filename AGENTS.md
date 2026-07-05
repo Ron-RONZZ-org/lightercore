@@ -45,15 +45,18 @@ lightercore/
 │       ├── paths.py
 │       ├── exceptions.py
 │       ├── crud.py
-│       └── backup.py
+│       ├── backup.py
+│       └── permissions.py      ← PermissionLevel enum, PermissionError, ConfirmationProtocol
 ├── docs/
 │   ├── AGENTS-db.md
 │   ├── AGENTS-paths.md
 │   ├── AGENTS-exceptions.md
 │   ├── AGENTS-crud.md
-│   └── AGENTS-backup.md
+│   ├── AGENTS-backup.md
+│   └── AGENTS-permissions.md
 └── tests/
-    └── __init__.py
+    ├── __init__.py
+    └── test_permissions.py
 ```
 
 ---
@@ -134,3 +137,4 @@ Use [Conventional Commits](https://www.conventionalcommits.org/):
 | Exceptions | `docs/AGENTS-exceptions.md` |
 | CRUD | `docs/AGENTS-crud.md` |
 | Backup | `docs/AGENTS-backup.md` |
+| Permissions | `docs/AGENTS-permissions.md` |
