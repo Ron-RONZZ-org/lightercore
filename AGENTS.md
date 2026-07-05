@@ -24,6 +24,7 @@ Context resolution order (highest priority first):
 - **Exceptions**: Hierarchical exception classes for all domain errors
 - **CRUD**: Generic create/read/update/delete with UUID prefix matching and soft-delete
 - **Backup**: Multi-strategy 7z-backed backup/restore with export/import and external sync
+- **LLM**: Shared LLM infrastructure — provider config, keyring persistence, profile CRUD, unified chat/command-generation, system prompt management
 
 **Design philosophy**: lightercore is the *one canonical implementation* of these cross-cutting concerns. Improvements flow outward — never inward.
 
@@ -46,17 +47,31 @@ lightercore/
 │       ├── exceptions.py
 │       ├── crud.py
 │       ├── backup.py
-│       └── permissions.py      ← PermissionLevel enum, PermissionError, ConfirmationProtocol
+│       ├── permissions.py      ← PermissionLevel enum, PermissionError, ConfirmationProtocol
+│       ├── llm/
+│       │   ├── __init__.py
+│       │   ├── config.py       ← ProviderConfig, keyring helpers, active config CRUD
+│       │   ├── profiles.py     ← ProfileManager (named LLM profiles)
+│       │   ├── protocol.py     ← LLMProvider Protocol
+│       │   ├── base.py         ← BaseLLMProvider (shared chat + command generation)
+│       │   └── utils.py        ← URL resolution, message parsing, DeepSeek compat
+│       └── system_prompt.py    ← SystemPromptManager (file-based, auto-seed)
 ├── docs/
 │   ├── AGENTS-db.md
 │   ├── AGENTS-paths.md
 │   ├── AGENTS-exceptions.md
 │   ├── AGENTS-crud.md
 │   ├── AGENTS-backup.md
-│   └── AGENTS-permissions.md
+│   ├── AGENTS-permissions.md
+│   └── AGENTS-llm.md
 └── tests/
     ├── __init__.py
-    └── test_permissions.py
+    ├── test_permissions.py
+    ├── test_llm_config.py
+    ├── test_llm_profiles.py
+    ├── test_llm_utils.py
+    ├── test_llm_base.py
+    └── test_system_prompt.py
 ```
 
 ---
@@ -138,3 +153,4 @@ Use [Conventional Commits](https://www.conventionalcommits.org/):
 | CRUD | `docs/AGENTS-crud.md` |
 | Backup | `docs/AGENTS-backup.md` |
 | Permissions | `docs/AGENTS-permissions.md` |
+| LLM | `docs/AGENTS-llm.md` |
