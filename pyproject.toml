@@ -22,6 +22,7 @@ dependencies = [
 dev = [
     "pytest>=8.0.0",
     "pytest-mock>=3.14.0",
+    "pytest-asyncio>=0.23.0",
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -29,6 +30,7 @@ packages = ["src/lightercore"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+asyncio_mode = "auto"
 
 [tool.ruff.lint]
 select = ["S110", "S112", "E", "F", "I"]
