@@ -11,7 +11,10 @@ Usage::
     from lightercore.exceptions import LighterbirdError
 """
 
-from lightercore import db, paths, exceptions, backup, crud, permissions
+from lightercore import db, paths, exceptions, backup, crud, permissions, llm, system_prompt
 from lightercore.paths import set_app_name
 
-__all__ = ["db", "paths", "exceptions", "backup", "crud", "permissions", "set_app_name"]
+__all__ = [
+    "db", "paths", "exceptions", "backup", "crud", "permissions",
+    "llm", "system_prompt", "set_app_name",
+]
