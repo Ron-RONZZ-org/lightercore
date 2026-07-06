@@ -64,7 +64,7 @@ class SystemPromptManager:
             path.write_text(default, encoding="utf-8")
         except OSError:
             pass
-        return default
+        return default.strip()
 
     def reload(self, default: str) -> str:
         """Force-reload the prompt, ignoring any cached state.
