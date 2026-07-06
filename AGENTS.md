@@ -154,3 +154,4 @@ Use [Conventional Commits](https://www.conventionalcommits.org/):
 | Backup | `docs/AGENTS-backup.md` |
 | Permissions | `docs/AGENTS-permissions.md` |
 | LLM | `docs/AGENTS-llm.md` |
+| Prompt Commands | `docs/AGENTS-prompt-commands.md` |
