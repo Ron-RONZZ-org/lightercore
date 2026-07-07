@@ -67,5 +67,21 @@ class LLMProvider(Protocol):
         """
         ...
 
+    async def embed(self, texts: list[str]) -> list[list[float]]:
+        """Generate vector embeddings for one or more texts.
+
+        Args:
+            texts: List of text strings to embed.
+
+        Returns:
+            List of embedding vectors, one per input text.
+            Each vector is a ``list[float]`` with dimensionality
+            determined by the embedding model.
+
+        Raises:
+            AIError: If this provider does not support embeddings.
+        """
+        ...
+
 
 __all__ = ["LLMProvider"]

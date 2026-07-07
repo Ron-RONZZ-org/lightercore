@@ -124,6 +124,75 @@ class BaseLLMProvider:
         """Return the full chat completions URL."""
         return f"{self.base_url}/chat/completions"
 
+    # ── Embedding ───────────────────────────────────────────────────────────
+
+    def _embed_url(self) -> str:
+        """Return the full embeddings API URL.
+
+        Subclasses may override for provider-specific endpoints
+        (e.g. Ollama uses ``/api/embed`` instead of ``/v1/embeddings``).
+        """
+        return f"{self.base_url}/embeddings"
+
+    def _build_embed_payload(self, texts: list[str]) -> dict[str, Any]:
+        """Build the JSON payload for an embedding request.
+
+        Subclasses may override for provider-specific payload formats.
+
+        Args:
+            texts: List of text strings to embed.
+
+        Returns:
+            Dict with ``input``, ``model`` keys.
+        """
+        return {
+            "model": self.config.model or "text-embedding-3-small",
+            "input": texts if len(texts) > 1 else texts[0],
+        }
+
+    def _parse_embed_response(self, data: dict[str, Any]) -> list[list[float]]:
+        """Parse the embedding response into a list of vectors.
+
+        Override in subclasses for non-OpenAI-compatible response formats.
+
+        Args:
+            data: Parsed JSON response from the embedding API.
+
+        Returns:
+            List of embedding vectors, one per input text, in input order.
+        """
+        raw = data.get("data", [])
+        raw.sort(key=lambda x: x.get("index", 0))
+        return [item["embedding"] for item in raw]
+
+    async def embed(self, texts: list[str]) -> list[list[float]]:
+        """Generate embeddings via the configured provider's embedding endpoint.
+
+        Args:
+            texts: List of text strings to embed.
+
+        Returns:
+            List of embedding vectors.
+
+        Raises:
+            AIError: If the provider is not configured or the API call fails.
+        """
+        if not self.config.is_available():
+            raise AIError("LLM provider not configured.")
+
+        headers = self._build_headers()
+        payload = self._build_embed_payload(texts)
+        url = self._embed_url()
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(url, json=payload, headers=headers)
+            if response.is_error:
+                detail = response_error_detail(response)
+                raise AIError(
+                    f"Embedding API error (HTTP {response.status_code}): {detail}"
+                )
+            return self._parse_embed_response(response.json())
+
     async def chat(
         self,
         messages: list[dict],
