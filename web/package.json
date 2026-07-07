@@ -1,0 +1,21 @@
+{
+  "name": "@lightercore/ui",
+  "version": "0.1.0",
+  "description": "Shared Svelte 5 UI components for the lightercore ecosystem (lighterbird, semantika)",
+  "type": "module",
+  "exports": {
+    "./*": "./src/lib/*"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "peerDependencies": {
+    "svelte": "^5.0.0"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^7.2.0",
+    "svelte": "^5.56.4",
+    "vitest": "^4.1.10"
+  }
+}
