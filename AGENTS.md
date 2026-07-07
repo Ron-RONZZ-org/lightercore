@@ -25,8 +25,11 @@ Context resolution order (highest priority first):
 - **CRUD**: Generic create/read/update/delete with UUID prefix matching and soft-delete
 - **Backup**: Multi-strategy 7z-backed backup/restore with export/import and external sync
 - **LLM**: Shared LLM infrastructure — provider config, keyring persistence, profile CRUD, unified chat/command-generation, system prompt management
+- **Svelte UI**: Shared Svelte 5 components and stores — reactive stores (bannerStore, keyboardShortcuts, dirtyFormStore, tabStore), utility functions (listTabFormat, listTabSelection), and UI components (BannerContainer). Published as a separate npm package (`@lightercore/ui`) from `web/`.
 
 **Design philosophy**: lightercore is the *one canonical implementation* of these cross-cutting concerns. Improvements flow outward — never inward.
+
+> **Dual-build architecture**: The `web/` subdirectory is a standalone npm package (`@lightercore/ui`) with its own `package.json` and `vitest.config.js`. The Python package (Hatchling, `src/lightercore/`) and JS package (Vite, `web/`) are fully independent build systems sharing the same repo.
 
 ---
 
@@ -64,14 +67,28 @@ lightercore/
 │   ├── AGENTS-backup.md
 │   ├── AGENTS-permissions.md
 │   └── AGENTS-llm.md
-└── tests/
-    ├── __init__.py
-    ├── test_permissions.py
-    ├── test_llm_config.py
-    ├── test_llm_profiles.py
-    ├── test_llm_utils.py
-    ├── test_llm_base.py
-    └── test_system_prompt.py
+├── tests/
+│   ├── __init__.py
+│   ├── test_permissions.py
+│   ├── test_llm_config.py
+│   ├── test_llm_profiles.py
+│   ├── test_llm_utils.py
+│   ├── test_llm_base.py
+│   └── test_system_prompt.py
+└── web/                           ← Svelte UI component package (@lightercore/ui)
+    ├── package.json               # npm package with exports field
+    ├── vitest.config.js           # Vitest with @sveltejs/vite-plugin-svelte
+    ├── .gitignore
+    └── src/lib/                   # Shared Svelte components, stores, utilities
+        ├── bannerStore.svelte.js
+        ├── keyboardShortcuts.svelte.js
+        ├── dirtyFormStore.svelte.js
+        ├── tabStore.svelte.js
+        ├── listTabFormat.js
+        ├── listTabSelection.svelte.js
+        ├── listTabShared.svelte.js     (barrel)
+        ├── BannerContainer.svelte
+        └── *.test.js              (75+ tests)
 ```
 
 ---
@@ -90,28 +107,53 @@ lightercore/
 
 ## Testing Requirements
 
-| Aspect | Convention |
-|--------|-----------|
-| Framework | pytest |
-| Run all tests | `uv run pytest tests/` |
-| Coverage target | 90%+ line coverage |
+| Layer | Framework | Command | Coverage |
+|-------|-----------|---------|----------|
+| Python (pytest) | pytest | `uv run pytest tests/` | 90%+ line |
+| Svelte/JS (vitest) | vitest + jsdom | `cd web && npm test` | 75+ tests |
 
-### Principles
+### Python Principles
 
 1. Test via the public API — consumer projects depend on `lightercore.backup.list_backups()`.
 2. Use `tmp_path` for file I/O tests. Never write to real user directories.
 3. The backup module uses `py7zr` and `sqlite3` — tests must verify archive integrity.
 4. Every bug fix must include a regression test.
 
+### Svelte/JS Principles
+
+1. Test stores and pure functions with vitest + jsdom environment.
+2. Svelte 5 rune modules (`.svelte.js`) are compiled by `@sveltejs/vite-plugin-svelte` during tests.
+3. The `CSS.escape` polyfill is required in test setup since jsdom doesn't provide it.
+4. Consumer projects run their own tests; lightercore tests validate the canonical implementation.
+
 ---
 
 ## Dependency Management
+
+### Python
 
 | Operation | Command |
 |-----------|---------|
 | Install dev | `uv pip install -e ".[dev]"` |
 | Run tests | `uv run pytest tests/` |
 | Add dependency | `uv add <pkg>` |
+
+### Svelte/JS
+
+| Operation | Command |
+|-----------|---------|
+| Install deps | `cd web && npm install` |
+| Run tests | `cd web && npm test` |
+| Add dependency | `cd web && npm install --save-dev <pkg>` |
+
+Consumers reference the UI package via npm `file:` dependency:
+```json
+{
+  "devDependencies": {
+    "@lightercore/ui": "file:../../lightercore/web"
+  }
+}
+```
 
 ---
 
@@ -121,18 +163,34 @@ lightercore/
 - **Do not add project-specific logic** that only one consumer would use.
 - **Do not depend on FastAPI, uvicorn, or any web framework.**
 - **Do not hardcode application-specific paths** — use env vars.
+- **Do not add Svelte components with consumer-specific imports** — components in `web/src/lib/` must only import from other lightercore modules or from standard libraries. Imports like `"../TabView.svelte"` or `"../HomeTab.svelte"` that reference consumer-specific components must NOT be added.
 
 ---
 
 ## Migration Policy
 
-When migrating code into lightercore:
+### Python Code
+
+When migrating Python code into lightercore:
 
 1. Compare the two implementations (lighterbird vs semantika).
 2. Merge the best parts of each into the canonical version.
 3. Remove the old copy from the downstream project.
 4. Update `pyproject.toml` in the downstream project to add `lightercore`.
 5. Run downstream tests to confirm transparent migration.
+
+### Svelte/JS Code
+
+When migrating Svelte/JS code into lightercore's `web/`:
+
+1. Compare the two implementations (lighterbird vs semantika).
+2. Merge the best parts of each into the canonical version under `web/src/lib/`.
+3. In consumer projects, replace the local file with a re-export from `@lightercore/ui`.
+4. For `.svelte` components, update imports to use `@lightercore/ui/<component>`.
+5. For `.svelte.js` stores/utilities, export/import from the barrel or directly.
+6. Add tests in lightercore's `web/src/lib/` for the canonical implementation.
+7. Run consumer tests + `npm test` in lightercore/web to verify.
+8. Follow the same "merge → delete local → test" pattern — never leave stale copies.
 
 ---
 
