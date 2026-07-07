@@ -134,6 +134,22 @@ class BaseLLMProvider:
         """
         return f"{self.base_url}/embeddings"
 
+    def _embedding_model(self) -> str:
+        """Return the model name to use for embeddings.
+
+        Resolution order:
+        1. ``config.embedding_model`` (explicitly configured)
+        2. Provider-specific default based on ``config.provider_type``
+        3. ``text-embedding-3-small`` (OpenAI-compatible default)
+        """
+        if self.config.embedding_model:
+            return self.config.embedding_model
+        defaults = {
+            "openai": "text-embedding-3-small",
+            "deepseek": "deepseek-embedding",
+        }
+        return defaults.get(self.config.provider_type, "text-embedding-3-small")
+
     def _build_embed_payload(self, texts: list[str]) -> dict[str, Any]:
         """Build the JSON payload for an embedding request.
 
@@ -146,7 +162,7 @@ class BaseLLMProvider:
             Dict with ``input``, ``model`` keys.
         """
         return {
-            "model": self.config.model or "text-embedding-3-small",
+            "model": self._embedding_model(),
             "input": texts if len(texts) > 1 else texts[0],
         }
 
