@@ -6,7 +6,16 @@
   "exports": {
     "./*": "./src/lib/*"
   },
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
   "peerDependencies": {
     "svelte": "^5.0.0"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^7.2.0",
+    "svelte": "^5.56.4",
+    "vitest": "^4.1.10"
   }
 }
