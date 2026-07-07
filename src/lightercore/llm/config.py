@@ -64,6 +64,7 @@ class ProviderConfig:
     api_key: str = ""
     base_url: str = ""
     model: str = ""
+    embedding_model: str = ""
     temperature: float = 0.7
     max_tokens: int = 2048
 
@@ -75,6 +76,7 @@ class ProviderConfig:
             f"api_key={redacted!r}, "
             f"base_url={self.base_url!r}, "
             f"model={self.model!r}, "
+            f"embedding_model={self.embedding_model!r}, "
             f"temperature={self.temperature}, "
             f"max_tokens={self.max_tokens})"
         )
@@ -86,6 +88,7 @@ class ProviderConfig:
             "api_key": self.api_key,
             "base_url": self.base_url,
             "model": self.model,
+            "embedding_model": self.embedding_model,
             "temperature": self.temperature,
             "max_tokens": self.max_tokens,
         }
@@ -98,6 +101,7 @@ class ProviderConfig:
             api_key=data.get("api_key", ""),
             base_url=data.get("base_url", ""),
             model=data.get("model", ""),
+            embedding_model=data.get("embedding_model", ""),
             temperature=float(data.get("temperature", 0.7)),
             max_tokens=int(data.get("max_tokens", 2048)),
         )
