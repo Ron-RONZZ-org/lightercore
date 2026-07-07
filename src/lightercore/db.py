@@ -16,6 +16,7 @@ Usage::
 
 from __future__ import annotations
 
+import collections.abc
 import sqlite3
 import threading
 import weakref
@@ -42,9 +43,23 @@ class LighterbirdDB:
     reclaimed when that thread terminates.
     """
 
-    def __init__(self, path: str | Path) -> None:
+    def __init__(
+        self,
+        path: str | Path,
+        *,
+        after_connect: collections.abc.Callable[[sqlite3.Connection], None] | None = None,
+    ) -> None:
+        """Initialize the database.
+
+        Args:
+            path: Path to the SQLite database file.
+            after_connect: Optional callback invoked on each new SQLite
+                connection (e.g. to load extensions like sqlite-vec).
+                Called once per thread since connections are cached per thread.
+        """
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._after_connect = after_connect
         self._local = threading.local()
         weakref.finalize(self, LighterbirdDB.close, self)
 
@@ -60,6 +75,8 @@ class LighterbirdDB:
             conn.execute("PRAGMA wal_autocheckpoint=100")
             conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
             conn.row_factory = sqlite3.Row
+            if self._after_connect:
+                self._after_connect(conn)
             self._local._conn = conn
         return conn
 
