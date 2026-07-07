@@ -10,7 +10,13 @@ used by both lighterbird and semantika:
 - :mod:`~lightercore.llm.utils` — URL resolution, message parsing
 """
 
-from lightercore.llm.base import BaseLLMProvider
+from lightercore.llm.base import (
+    BaseLLMProvider,
+    ChatResult,
+    ToolCall,
+    defs_to_tools,
+    tool_call_to_command,
+)
 from lightercore.llm.config import ProviderConfig
 from lightercore.llm.config import (
     clear_active_config,
@@ -25,13 +31,17 @@ from lightercore.llm.protocol import LLMProvider
 
 __all__ = [
     "BaseLLMProvider",
+    "ChatResult",
     "LLMProvider",
     "ProfileManager",
     "ProviderConfig",
+    "ToolCall",
     "clear_active_config",
+    "defs_to_tools",
     "keyring_delete",
     "keyring_get",
     "keyring_set",
     "load_active_config",
     "save_active_config",
+    "tool_call_to_command",
 ]

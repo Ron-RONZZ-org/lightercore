@@ -67,6 +67,25 @@ class LLMProvider(Protocol):
         """
         ...
 
+    async def chat_with_tools(
+        self,
+        messages: list[dict],
+        tools: list[dict],
+        *,
+        tool_choice: str | None = None,
+    ) -> Any:
+        """Send a chat with tool-calling support.
+
+        Args:
+            messages: Conversation history.
+            tools: OpenAI-compatible tool definitions.
+            tool_choice: Tool selection strategy.
+
+        Returns:
+            A :class:`ChatResult` with ``content`` and/or ``tool_calls``.
+        """
+        ...
+
     async def embed(self, texts: list[str]) -> list[list[float]]:
         """Generate vector embeddings for one or more texts.
 

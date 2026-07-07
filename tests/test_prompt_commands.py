@@ -135,9 +135,13 @@ class TestExpandPromptTemplate:
         )
         assert result == "10 emails from INBOX folder"
 
-    def test_unused_placeholder_left_as_is(self) -> None:
+    def test_last_param_is_greedy(self) -> None:
+        # The last $N captures all remaining args (greedy), not just one
         result = expand_prompt_template("$1 and $2", ["only"])
-        assert result == "only and $2"
+        assert result == "only and "
+        # With more args than placeholders, $2 gets the tail
+        result = expand_prompt_template("$1 and $2", ["first", "second", "third"])
+        assert result == "first and second third"
 
     def test_no_args(self) -> None:
         result = expand_prompt_template("Static prompt", [])

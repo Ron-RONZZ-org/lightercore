@@ -149,9 +149,15 @@ def _parse_file(path: Path) -> PromptCommand | None:
 def expand_prompt_template(template: str, args: list[str]) -> str:
     """Replace ``$1``, ``$2``, …, ``$N`` and ``$ARGUMENTS`` with positional args.
 
-    - ``$1``, ``$2``, … ``$9`` are replaced by the corresponding positional
-      argument.  Unused placeholders are left as-is.
-    - ``$ARGUMENTS`` is replaced by all args joined with spaces.
+    - When ``$ARGUMENTS`` is used, it is the catch-all and each ``$N``
+      captures its single corresponding arg (legacy behaviour).
+    - When ``$ARGUMENTS`` is *absent*, the *last* positional placeholder
+      (highest ``$N``) is **greedy**: it captures that arg and all
+      remaining args joined with spaces.  This means ``$1`` in a
+      single-placeholder template like ``text-to-triple`` captures the
+      full free-form text.
+    - All earlier placeholders (``$1`` … ``$(N-1)``) capture their
+      corresponding single arg as before.
 
     Args:
         template: The prompt template string with ``$N`` placeholders.
@@ -160,12 +166,32 @@ def expand_prompt_template(template: str, args: list[str]) -> str:
     Returns:
         Expanded prompt string.
     """
+    # Find the highest $N in the template
+    param_numbers = set()
+    for m in _PARAM_RE.finditer(template):
+        param_numbers.add(int(m.group(1)))
+    max_param = max(param_numbers) if param_numbers else 0
+
+    has_arguments = _ARGUMENTS_RE.search(template) is not None
+
     result = template
-    for i, arg in enumerate(args, start=1):
-        result = result.replace(f"${i}", arg)
-    # $ARGUMENTS gets all remaining args (not just the specific $N)
-    all_args = " ".join(args)
-    result = result.replace("$ARGUMENTS", all_args)
+
+    if has_arguments:
+        # Legacy: $ARGUMENTS is the designated catch-all
+        for i, arg in enumerate(args, start=1):
+            result = result.replace(f"${i}", arg)
+        all_args = " ".join(args)
+        result = result.replace("$ARGUMENTS", all_args)
+    else:
+        # No $ARGUMENTS: the last $N is greedy
+        for i in range(1, max_param):
+            arg = args[i - 1] if i <= len(args) else ""
+            result = re.sub(rf"\${i}\b", arg, result)
+
+        if max_param > 0:
+            remaining = " ".join(args[max_param - 1:]) if len(args) >= max_param else ""
+            result = re.sub(rf"\${max_param}\b", remaining, result)
+
     return result
 
 

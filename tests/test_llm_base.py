@@ -179,7 +179,7 @@ class TestChatStreaming:
         assert tokens == ["Hello", " ", "world"]
 
 
-# ── Command generation ──────────────────────────────────────────────────────
+# ── Command generation (tool-calling path) ──────────────────────────────────
 
 
 class TestGenerateCommand:
@@ -188,35 +188,210 @@ class TestGenerateCommand:
         result = await p.generate_command("list nodes", [])
         assert result is None
 
-    @patch.object(BaseLLMProvider, "chat")
-    async def test_generates_command(self, mock_chat: MagicMock) -> None:
-        mock_chat.return_value = '{"tokens": ["node", "list"], "flags": {}}'
-        p = BaseLLMProvider(_config(api_key="sk-test"))
-        result = await p.generate_command("list all nodes", [])
-        assert result == {"tokens": ["node", "list"], "flags": {}}
+    @patch.object(BaseLLMProvider, "chat_with_tools")
+    async def test_uses_tools_when_defs_given(
+        self, mock_tools: MagicMock
+    ) -> None:
+        from lightercore.llm.base import ChatResult, ToolCall
 
-    @patch.object(BaseLLMProvider, "chat")
-    async def test_generates_command_with_flags(self, mock_chat: MagicMock) -> None:
-        mock_chat.return_value = (
-            '{"tokens": ["node", "add"], "flags": {"labels": "Dog"}}'
+        mock_tools.return_value = ChatResult(
+            tool_calls=[
+                ToolCall(
+                    id="call_1",
+                    function={
+                        "name": "node_list",
+                        "arguments": '{}',
+                    },
+                )
+            ],
+            finish_reason="tool_calls",
         )
         p = BaseLLMProvider(_config(api_key="sk-test"))
-        result = await p.generate_command("add a node Dog", [])
-        assert result == {"tokens": ["node", "add"], "flags": {"labels": "Dog"}}
+        defs = [{"path": ["node", "list"], "description": "List nodes", "params": [], "flags": []}]
+        result = await p.generate_command("list nodes", defs)
+        assert result == {"tokens": ["node", "list"], "flags": {}}
+        mock_tools.assert_called_once()
 
-    @patch.object(BaseLLMProvider, "chat")
-    async def test_ai_error_returns_none(self, mock_chat: MagicMock) -> None:
-        mock_chat.side_effect = AIError("API error")
+    @patch.object(BaseLLMProvider, "chat_with_tools")
+    async def test_tool_call_with_flags(self, mock_tools: MagicMock) -> None:
+        from lightercore.llm.base import ChatResult, ToolCall
+
+        mock_tools.return_value = ChatResult(
+            tool_calls=[
+                ToolCall(
+                    id="call_2",
+                    function={
+                        "name": "predicate_search",
+                        "arguments": '{"q": "author"}',
+                    },
+                )
+            ],
+            finish_reason="tool_calls",
+        )
         p = BaseLLMProvider(_config(api_key="sk-test"))
-        result = await p.generate_command("list nodes", [])
+        defs = [{"path": ["predicate", "search"], "description": "Search", "params": [{"name": "q", "type": "string", "required": True}], "flags": []}]
+        result = await p.generate_command("search predicates about author", defs)
+        assert result == {"tokens": ["predicate", "search"], "flags": {"q": "author"}}
+
+    @patch.object(BaseLLMProvider, "chat_with_tools")
+    async def test_empty_defs_falls_back_to_json_prompt(
+        self, mock_tools: MagicMock
+    ) -> None:
+        """When command_defs is empty, uses the legacy JSON-in-prompt path."""
+        mock_tools.return_value = None  # should not be called
+        with patch.object(BaseLLMProvider, "chat") as mock_chat:
+            mock_chat.return_value = '{"tokens": ["node", "list"], "flags": {}}'
+            p = BaseLLMProvider(_config(api_key="sk-test"))
+            result = await p.generate_command("list nodes", [])
+            assert result == {"tokens": ["node", "list"], "flags": {}}
+            mock_tools.assert_not_called()
+            mock_chat.assert_called_once()
+
+    @patch.object(BaseLLMProvider, "chat_with_tools")
+    async def test_ai_error_returns_none(self, mock_tools: MagicMock) -> None:
+        from lightercore.exceptions import AIError
+
+        mock_tools.side_effect = AIError("API error")
+        p = BaseLLMProvider(_config(api_key="sk-test"))
+        result = await p.generate_command("list nodes", [{"path": ["node", "list"], "description": "", "params": [], "flags": []}])
         assert result is None
 
-    @patch.object(BaseLLMProvider, "chat")
-    async def test_parse_null_returns_none(self, mock_chat: MagicMock) -> None:
-        mock_chat.return_value = "null"
+    @patch.object(BaseLLMProvider, "chat_with_tools")
+    async def test_no_tool_call_falls_back_to_parse(
+        self, mock_tools: MagicMock
+    ) -> None:
+        from lightercore.llm.base import ChatResult
+
+        mock_tools.return_value = ChatResult(content='{"tokens": ["node", "list"], "flags": {}}')
         p = BaseLLMProvider(_config(api_key="sk-test"))
-        result = await p.generate_command("list nodes", [])
-        assert result is None
+        result = await p.generate_command("list nodes", [{"path": ["node", "list"], "description": "", "params": [], "flags": []}])
+        assert result == {"tokens": ["node", "list"], "flags": {}}
+
+
+# ── Tool calling — chat_with_tools ──────────────────────────────────────────
+
+
+class TestChatWithTools:
+    @patch("httpx.AsyncClient")
+    async def test_returns_tool_call(self, mock_client_cls: MagicMock) -> None:
+        from lightercore.llm.base import ChatResult
+
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.is_error = False
+        mock_response.json.return_value = {
+            "choices": [{
+                "message": {
+                    "content": None,
+                    "tool_calls": [{
+                        "id": "call_abc",
+                        "type": "function",
+                        "function": {"name": "node_list", "arguments": "{}"},
+                    }],
+                },
+                "finish_reason": "tool_calls",
+            }]
+        }
+
+        mock_instance = AsyncMock()
+        mock_instance.__aenter__.return_value = mock_instance
+        mock_instance.post.return_value = mock_response
+        mock_client_cls.return_value = mock_instance
+
+        p = BaseLLMProvider(_config(api_key="sk-test"))
+        tools = [{"type": "function", "function": {"name": "node_list", "parameters": {"type": "object", "properties": {}}}}]
+        result = await p.chat_with_tools(
+            [{"role": "user", "content": "list nodes"}],
+            tools,
+        )
+        assert isinstance(result, ChatResult)
+        assert result.tool_calls is not None
+        assert len(result.tool_calls) == 1
+        assert result.tool_calls[0].function["name"] == "node_list"
+        assert result.content is None
+
+    @patch("httpx.AsyncClient")
+    async def test_returns_text_when_no_tool(self, mock_client_cls: MagicMock) -> None:
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.is_error = False
+        mock_response.json.return_value = {
+            "choices": [{
+                "message": {"content": "Hello from LLM"},
+                "finish_reason": "stop",
+            }]
+        }
+
+        mock_instance = AsyncMock()
+        mock_instance.__aenter__.return_value = mock_instance
+        mock_instance.post.return_value = mock_response
+        mock_client_cls.return_value = mock_instance
+
+        p = BaseLLMProvider(_config(api_key="sk-test"))
+        result = await p.chat_with_tools(
+            [{"role": "user", "content": "hi"}],
+            [],
+        )
+        assert result.content == "Hello from LLM"
+        assert result.tool_calls is None
+
+    async def test_not_configured_raises(self) -> None:
+        p = BaseLLMProvider(_config(api_key=""))
+        with pytest.raises(AIError, match="not configured"):
+            await p.chat_with_tools([{"role": "user", "content": "hi"}], [])
+
+
+# ── Tool format conversion — defs_to_tools & tool_call_to_command ────────────
+
+
+class TestDefsToTools:
+    def test_converts_params_and_flags(self) -> None:
+        from lightercore.llm.base import defs_to_tools
+
+        defs = [
+            {
+                "path": ["node", "add"],
+                "description": "Add a node",
+                "params": [{"name": "labels", "type": "string", "required": True}],
+                "flags": [{"name": "id", "type": "string", "help": "Node ID"}],
+            },
+        ]
+        tools = defs_to_tools(defs)
+        assert len(tools) == 1
+        fn = tools[0]["function"]
+        assert fn["name"] == "node_add"
+        assert "labels" in fn["parameters"]["properties"]
+        assert fn["parameters"]["required"] == ["labels"]
+
+    def test_empty_defs(self) -> None:
+        from lightercore.llm.base import defs_to_tools
+
+        assert defs_to_tools([]) == []
+
+
+class TestToolCallToCommand:
+    def test_basic_conversion(self) -> None:
+        from lightercore.llm.base import ToolCall, tool_call_to_command
+
+        tc = ToolCall(id="c1", function={"name": "node_list", "arguments": "{}"})
+        result = tool_call_to_command(tc)
+        assert result == {"tokens": ["node", "list"], "flags": {}}
+
+    def test_with_flags(self) -> None:
+        from lightercore.llm.base import ToolCall, tool_call_to_command
+
+        tc = ToolCall(
+            id="c2",
+            function={"name": "predicate_search", "arguments": '{"q": "author"}'},
+        )
+        result = tool_call_to_command(tc)
+        assert result["tokens"] == ["predicate", "search"]
+        assert result["flags"] == {"q": "author"}
+
+    def test_invalid_args_returns_empty_flags(self) -> None:
+        from lightercore.llm.base import ToolCall, tool_call_to_command
+
+        tc = ToolCall(id="c3", function={"name": "node_list", "arguments": "not-json"})
+        result = tool_call_to_command(tc)
+        assert result["flags"] == {}
 
 
 # ── Hook overrides ──────────────────────────────────────────────────────────
