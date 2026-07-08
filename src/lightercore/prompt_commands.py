@@ -30,9 +30,11 @@ class PromptCommand:
     Attributes:
         name: File stem of the ``.md`` file (e.g. ``"weekly"``).
         description: First line starting with ``# ``, stripped of prefix.
-        template: Everything after the description line.
+        template: Everything after the description / frontmatter.
         path: Absolute filesystem path to the ``.md`` file.
         param_count: Highest ``$N`` placeholder number found (0 if none).
+        tools: Optional list of tool domains parsed from YAML frontmatter
+            (e.g. ``["node", "predicate", "triple"]``).
     """
 
     name: str
@@ -40,6 +42,7 @@ class PromptCommand:
     template: str
     path: Path
     param_count: int = field(default=0, compare=False)
+    tools: list[str] | None = field(default=None, compare=False)
 
 
 _PARAM_RE = re.compile(r"\$([1-9])\b")
@@ -102,6 +105,52 @@ def load_prompt_command(commands_dir: Path, name: str) -> PromptCommand | None:
     return None
 
 
+def _parse_frontmatter(text: str) -> tuple[str, list[str] | None]:
+    """Parse YAML frontmatter from prompt command text.
+
+    Looks for a ``---`` delimited block at the start of the file.
+    Currently only the ``tools`` key is recognised (a list of strings).
+
+    Returns:
+        ``(remaining_body, tools_list_or_None)``.
+    """
+    if not text.startswith("---\n") and not text.startswith("---\r\n"):
+        return text, None
+
+    end = text.find("\n---", 3)
+    if end == -1:
+        return text, None  # Unclosed frontmatter — treat as body
+
+    frontmatter = text[4:end]
+    body = text[end + 4:].lstrip("\n\r")
+
+    # Parse tools from frontmatter (simple YAML subset)
+    tools: list[str] | None = None
+    for raw_line in frontmatter.split("\n"):
+        line = raw_line.strip()
+        # tools: [a, b, c]  — inline list
+        if line.startswith("tools:"):
+            rest = line[6:].strip()
+            if rest.startswith("["):
+                # YAML-style list (items may be unquoted)
+                inner = rest.strip("[]")
+                tools = [s.strip().strip("\"'").lower()
+                         for s in inner.split(",") if s.strip()]
+            elif rest:
+                # Single value (no brackets)
+                tools = [rest.lower()]
+            else:
+                # "tools:" on its own line — block list follows
+                tools = []
+        # tools:\n  - a\n  - b  — block list
+        elif line.startswith("- ") and tools is not None:
+            val = line[2:].strip().lower()
+            if val:
+                tools.append(val)
+
+    return body, tools
+
+
 def _parse_file(path: Path) -> PromptCommand | None:
     """Parse a single ``.md`` file into a ``PromptCommand``, or None."""
     try:
@@ -109,7 +158,10 @@ def _parse_file(path: Path) -> PromptCommand | None:
     except (OSError, UnicodeDecodeError):
         return None
 
-    lines = text.split("\n")
+    # Strip frontmatter before extracting description
+    body, tools = _parse_frontmatter(text)
+
+    lines = body.split("\n")
     # First non-empty line must start with "# "
     first_line = ""
     for line in lines:
@@ -140,6 +192,7 @@ def _parse_file(path: Path) -> PromptCommand | None:
         template=template,
         path=path,
         param_count=param_count,
+        tools=tools,
     )
 
 
