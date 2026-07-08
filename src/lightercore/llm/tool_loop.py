@@ -27,6 +27,11 @@ from lightercore.permissions import PermissionLevel
 
 logger = logging.getLogger(__name__)
 
+# Maximum size (in characters) for a single tool result appended to the
+# conversation.  Large results (e.g. email lists with body text) are
+# truncated to prevent exceeding the LLM's context window.
+_MAX_TOOL_RESULT_CHARS = 100_000
+
 # ── In-memory store for paused executions ──────────────────────────────────
 
 _pending_executions: dict[str, dict] = {}
@@ -175,10 +180,16 @@ async def run_tool_loop(
                 cmd_result = dispatch_fn(path, flags)
             except Exception as exc:
                 cmd_result = {"error": str(exc)}
+            content = json.dumps(sanitize_tool_result(cmd_result))
+            if len(content) > _MAX_TOOL_RESULT_CHARS:
+                content = content[:_MAX_TOOL_RESULT_CHARS] + (
+                    f'\n\n[Result truncated to {_MAX_TOOL_RESULT_CHARS} chars. '
+                    f'Full result had {len(content)} chars.]'
+                )
             messages.append({
                 "role": "tool",
                 "tool_call_id": tc.id,
-                "content": json.dumps(sanitize_tool_result(cmd_result)),
+                "content": content,
             })
 
         # If there are pending write+ tools, gate them behind user review
@@ -295,10 +306,16 @@ async def resume_execution(
             # READ tool already executed in the loop — skip
             continue
 
+        content = json.dumps(sanitize_tool_result(cmd_result))
+        if len(content) > _MAX_TOOL_RESULT_CHARS:
+            content = content[:_MAX_TOOL_RESULT_CHARS] + (
+                f'\n\n[Result truncated to {_MAX_TOOL_RESULT_CHARS} chars. '
+                f'Full result had {len(content)} chars.]'
+            )
         messages.append({
             "role": "tool",
             "tool_call_id": tc.id,
-            "content": json.dumps(sanitize_tool_result(cmd_result)),
+            "content": content,
         })
 
     # Continue the loop
