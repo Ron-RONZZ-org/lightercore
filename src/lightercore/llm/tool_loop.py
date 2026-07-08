@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 # Maximum size (in characters) for a single tool result appended to the
 # conversation.  Large results (e.g. email lists with body text) are
 # truncated to prevent exceeding the LLM's context window.
-_MAX_TOOL_RESULT_CHARS = 100_000
+_MAX_TOOL_RESULT_CHARS = 200_000
 
 # ── In-memory store for paused executions ──────────────────────────────────
 
