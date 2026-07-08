@@ -99,7 +99,7 @@ def defs_to_tools(command_defs: list[dict]) -> list[dict]:
             )
             properties[p["name"]] = {
                 "type": ptype,
-                "description": p.get("name", ""),
+                "description": p.get("description", p.get("name", "")),
             }
             if p.get("required"):
                 required.append(p["name"])
