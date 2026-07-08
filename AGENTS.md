@@ -51,6 +51,7 @@ lightercore/
 │       ├── crud.py
 │       ├── backup.py
 │       ├── permissions.py      ← PermissionLevel enum, PermissionError, ConfirmationProtocol
+│       ├── dev_helpers.py      ← Shared dev-server CLI infrastructure (--data-dir, --seed, temp dir, env vars)
 │       ├── llm/
 │       │   ├── __init__.py
 │       │   ├── config.py       ← ProviderConfig, keyring helpers, active config CRUD
