@@ -58,6 +58,10 @@ class LLMProvider(Protocol):
     ) -> dict | None:
         """Translate natural language to a structured command.
 
+        .. deprecated::
+            Use :meth:`chat_with_tools` inside a multi-round tool loop
+            instead.
+
         Args:
             message: User's natural language request.
             command_defs: Available command definitions for the LLM.
