@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import json
 import logging
+import warnings
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Any
@@ -515,6 +516,13 @@ class BaseLLMProvider:
     ) -> dict[str, Any] | None:
         """Ask the LLM to generate a structured command from natural language.
 
+        .. deprecated::
+            Use :meth:`chat_with_tools` inside a :func:`run_tool_loop`
+            instead.  ``generate_command`` is a single-shot wrapper that
+            discards all but the first tool call.  The ``run_tool_loop``
+            pattern in ``lighterbird.server.llm.tool_loop`` supports
+            multi-round iteration and human-in-the-loop approval.
+
         Uses **native tool calling** when ``command_defs`` is non-empty
         (OpenAI, DeepSeek, and Ollama all support it).  Falls back to the
         JSON-in-prompt approach only when tool calling is unavailable.
@@ -526,6 +534,13 @@ class BaseLLMProvider:
         Returns:
             ``{"tokens": [...], "flags": {...}}`` or ``None``.
         """
+        import warnings
+        warnings.warn(
+            "generate_command is deprecated. Use chat_with_tools() inside "
+            "a run_tool_loop() instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         if not self.config.is_available():
             return None
 
