@@ -42,6 +42,20 @@ See `docs/` for per-module documentation.
 | Cache dir | `LIGHTERCORE_CACHE_DIR` | `LIGHTERBIRD_CACHE_DIR` | `SEMANTIKA_CACHE_DIR` |
 | State dir | `LIGHTERCORE_STATE_DIR` | `LIGHTERBIRD_STATE_DIR` | `SEMANTIKA_STATE_DIR` |
 
+## Web Package (`@lightercore/ui`)
+
+The `web/` directory is a standalone npm package (`@lightercore/ui`) providing shared Svelte 5 stores, utilities, and components consumed by both lighterbird and semantika:
+
+- **`tabStore.svelte.js`** — Reactive tab management
+- **`dirtyFormStore.svelte.js`** — Unsaved-changes tracking
+- **`bannerStore.svelte.js`** — Auto-dismissing notification banner
+- **`commandHistory.svelte.js`** — Persistent command history
+- **`keyboardShortcuts.svelte.js`** — Keyboard shortcut registration
+- **`listTabSelection.svelte.js`** — Selection/range navigation for list tabs
+- **`listTabShared.svelte.js`** — Shared list tab utilities (clipboard, date formatting)
+- **`preview.svelte.js`** — Content preview modal
+- **`multiCommand.js`** — Multi-command input parsing (`splitCommands()`, `isMultiCommand()`)
+
 ## Design
 
 lightercore is the **one canonical implementation** of shared infrastructure. Improvements flow outward — no more fork-and-strip degradation.
