@@ -9,7 +9,7 @@
 </script>
 
 {#if visible && msg}
-  <div class="banner-container" class:banner-success={type === "success"} class:banner-error={type === "error"} class:banner-info={type === "info"} role="status">
+  <div class="banner-container" class:banner-success={type === "success"} class:banner-error={type === "error"} class:banner-info={type === "info"} class:banner-warning={type === "warning"} class:banner-persistent={banner.persistent} role="status">
     <span class="banner-icon">
       {#if type === "success"}✓
       {:else if type === "error"}✗
@@ -56,6 +56,17 @@
     background: #1e2a3a;
     color: #8fbfdb;
     border: 1px solid #3a5a7a;
+  }
+  .banner-warning {
+    background: #3a3a1e;
+    color: #dbdb8f;
+    border: 1px solid #7a7a3a;
+  }
+  .banner-persistent {
+    white-space: normal;
+    word-break: break-word;
+    max-width: 80vw;
+    line-height: 1.4;
   }
   .banner-icon {
     font-size: 1rem;

@@ -10,6 +10,7 @@ Provides foundational building blocks for both [lighterbird](https://github.com/
 - **CRUD** — Generic CRUD with UUID prefix matching + soft-delete
 - **Backup** — Multi-strategy 7z backup/restore with SHA-256 verification
 - **Permissions** — `PermissionLevel` enum (READ/WRITE/DESTRUCTIVE/SYSTEM), `PermissionError`, and `ConfirmationProtocol` for LLM command safety
+- **Prompt Files** — `PromptFile` dataclass and `PromptFilesManager` for tracking, comparing, resetting, and saving shipped prompt files (`system_prompt.md`, `AGENTS.md`, command files, etc.)
 
 ## Installation
 
