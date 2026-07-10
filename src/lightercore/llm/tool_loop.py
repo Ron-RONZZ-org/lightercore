@@ -160,7 +160,7 @@ async def run_tool_loop(
 
         # Process tool calls in this batch
         write_batch: list[dict] = []
-        for tc in result.tool_calls:
+        for tc_idx, tc in enumerate(result.tool_calls):
             path, flags = tc_path(tc)
             level = get_command_level_fn(path) if get_handler_metadata_fn(path) is not None else None
 
@@ -169,6 +169,7 @@ async def run_tool_loop(
             if level is not None and level >= PermissionLevel.WRITE:
                 meta = get_handler_metadata_fn(path) or {}
                 write_batch.append({
+                    "index": tc_idx,
                     "tokens": path.split("."),
                     "flags": flags,
                     "description": meta.get("description", ""),
@@ -230,10 +231,44 @@ async def run_tool_loop(
 # ── Resume ─────────────────────────────────────────────────────────────────
 
 
+def _format_command_str(tokens: list[str], flags: dict[str, str]) -> str:
+    """Format a command with flags into a human-readable string.
+
+    E.g. ``["node", "add"]`` + ``{"label": "Alice"}`` → ``!node add --label Alice``
+    """
+    cmd = "!" + " ".join(tokens)
+    for k, v in flags.items():
+        if v:
+            cmd += f" --{k} {v}"
+        else:
+            cmd += f" --{k}"
+    return cmd
+
+
+def _resolve_feedback(
+    idx: int,
+    resolved: dict[int, bool],
+    feedback: dict[int, str] | str | None,
+) -> str | None:
+    """Resolve user feedback for a specific tool index.
+
+    Returns the feedback string if the tool was rejected and feedback
+    was provided, otherwise ``None``.
+    """
+    if not feedback:
+        return None
+    if resolved.get(idx, False):
+        return None  # approved — no feedback needed
+    if isinstance(feedback, dict):
+        return feedback.get(idx)
+    return feedback  # global feedback string
+
+
 async def resume_execution(
     session_id: str,
     decisions: dict[int, bool] | None = None,
     confirmed: bool | None = None,
+    feedback: dict[int, str] | str | None = None,
     *,
     provider: Any,
     dispatch_fn: Any,
@@ -250,6 +285,9 @@ async def resume_execution(
             Overrides *confirmed* when present.
         confirmed: Blanket approval for all tools (``true`` = approve all,
             ``false`` = reject all).
+        feedback: User feedback for rejected tools. Can be:
+            - A ``str``: applied to ALL rejected tools (global feedback).
+            - A ``dict[int, str]``: per-index feedback for specific tools.
         provider: LLM provider instance.
         dispatch_fn: Command dispatch callable.
         get_handler_metadata_fn: Registry metadata lookup.
@@ -283,6 +321,10 @@ async def resume_execution(
     else:
         resolved = {}
 
+    # Inject user feedback as a single user message before tool results
+    # so the LLM sees the context before processing tool results.
+    _inject_feedback_summary(messages, tool_calls, resolved, feedback)
+
     # Process ALL tools, executing approved writes and recording rejections
     for idx, tc_data in enumerate(tool_calls):
         tc = ToolCall(
@@ -301,7 +343,12 @@ async def resume_execution(
                 except Exception as exc:
                     cmd_result = {"error": str(exc)}
             else:
-                cmd_result = {"error": f"User rejected !{'.'.join(path.split('.'))}"}
+                fb = _resolve_feedback(idx, resolved, feedback)
+                if fb:
+                    cmd_str = _format_command_str(path.split("."), flags)
+                    cmd_result = {"error": f"User rejected {cmd_str}, with the feedback: {fb}"}
+                else:
+                    cmd_result = {"error": f"User rejected !{'.'.join(path.split('.'))}"}
         else:
             # READ tool already executed in the loop — skip
             continue
@@ -330,10 +377,57 @@ async def resume_execution(
     )
 
 
+def _inject_feedback_summary(
+    messages: list[dict],
+    tool_calls: list[dict],
+    resolved: dict[int, bool],
+    feedback: dict[int, str] | str | None,
+) -> None:
+    """Inject a single summary user message for rejected tools.
+
+    Instead of injecting per-tool messages (which could break the
+    tool-loop message pattern), this creates ONE user message that
+    summarises rejected tools + feedback, placed before the tool
+    results so the LLM has context.
+    """
+    if not feedback:
+        return
+
+    parts: list[str] = []
+    for idx, tc_data in enumerate(tool_calls):
+        tc = ToolCall(
+            id=tc_data.get("id", ""),
+            type=tc_data.get("type", "function"),
+            function=tc_data.get("function", {}),
+        )
+        path, flags = tc_path(tc)
+        approved = resolved.get(idx, False)
+        if approved:
+            continue
+        fb = _resolve_feedback(idx, resolved, feedback)
+        if not fb:
+            continue
+        cmd_str = _format_command_str(path.split("."), flags)
+        parts.append(f"- Rejected {cmd_str}: {fb}")
+
+    if not parts:
+        return
+
+    summary = "The user reviewed the proposed operations and provided the following feedback:\n\n" + "\n".join(parts) + \
+        "\n\nThe user is waiting for you to adjust your approach based on this feedback."
+    messages.append({
+        "role": "user",
+        "content": summary,
+    })
+
+
 __all__ = [
+    "_format_command_str",
+    "_inject_feedback_summary",
     "_pending_executions",
-    "run_tool_loop",
+    "_resolve_feedback",
     "resume_execution",
+    "run_tool_loop",
     "sanitize_tool_result",
     "tc_path",
 ]
