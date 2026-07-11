@@ -102,6 +102,7 @@
     <div class="form">
       <label class="field">
         <span class="field-label">Profile Name</span>
+        <!-- svelte-ignore a11y_autofocus -->
         <input type="text" class="text-input" bind:value={name} placeholder="my-profile" disabled={isEdit} autofocus />
       </label>
       <label class="field">
