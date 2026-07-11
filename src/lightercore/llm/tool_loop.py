@@ -308,7 +308,9 @@ async def resume_execution(
 
     # Resolve decisions
     if decisions is not None:
-        resolved = decisions
+        # JSON-serialized decisions from the frontend have string keys ("0")
+        # but the tool_calls enumeration uses int indices — convert here.
+        resolved = {int(k): bool(v) for k, v in decisions.items()}
     elif confirmed is not None:
         # Find the write tools by index
         write_indices = set()

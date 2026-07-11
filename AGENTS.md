@@ -25,7 +25,7 @@ Context resolution order (highest priority first):
 - **CRUD**: Generic create/read/update/delete with UUID prefix matching and soft-delete
 - **Backup**: Multi-strategy 7z-backed backup/restore with export/import and external sync
 - **LLM**: Shared LLM infrastructure — provider config, keyring persistence, profile CRUD, unified chat/command-generation, system prompt management
-- **Svelte UI**: Shared Svelte 5 components and stores — reactive stores (bannerStore with persistent support, keyboardShortcuts, dirtyFormStore, tabStore), utility functions (listTabFormat, listTabSelection), and UI components (BannerContainer). Published as a separate npm package (`@lightercore/ui`) from `web/`.
+- **Svelte UI**: Shared Svelte 5 components and stores — reactive stores (bannerStore with persistent support, keyboardShortcuts, dirtyFormStore, tabStore), utility functions (listTabFormat, listTabSelection, conversationUtils), and UI components (BannerContainer, ConfirmDialog). Published as a separate npm package (`@lightercore/ui`) from `web/`.
 - **Prompt Files**: Registry for shipped prompt files — ``PromptFilesManager`` provides ``list_all``, ``get_content``, ``is_modified``, ``reset``, ``save``, ``modified_count``, and ``reset_all`` for discovering, inspecting, comparing, and resetting app prompt files.
 
 **Design philosophy**: lightercore is the *one canonical implementation* of these cross-cutting concerns. Improvements flow outward — never inward.
@@ -91,8 +91,10 @@ lightercore/
         ├── listTabFormat.js
         ├── listTabSelection.svelte.js
         ├── listTabShared.svelte.js     (barrel)
+        ├── conversationUtils.js
         ├── BannerContainer.svelte
-        └── *.test.js              (75+ tests)
+        ├── ConfirmDialog.svelte
+        └── *.test.js              (80+ tests)
 ```
 
 ---
