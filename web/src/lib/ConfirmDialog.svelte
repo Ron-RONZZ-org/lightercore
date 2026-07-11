@@ -207,7 +207,7 @@
 
       <div class="global-actions">
         <button class="btn btn-approve-all" onclick={handleToggleApproveAll}>
-          {allApprovedToggle ? "&#10003; Approved All" : "&#10003; Approve All"}
+          {allApprovedToggle ? "\u2713 Approved All" : "\u2713 Approve All"}
         </button>
         {#if allowGlobalFeedback}
           <button class="btn btn-global-feedback" onclick={handleGlobalFeedbackToggle}>

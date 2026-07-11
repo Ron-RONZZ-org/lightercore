@@ -106,36 +106,37 @@ class TestInjectFeedbackSummary:
         }
 
     def test_no_feedback_no_change(self):
-        """No feedback -> messages unchanged."""
+        """No feedback -> decision summary still injected (no feedback text)."""
         messages = [{"role": "user", "content": "hello"}]
         tool_calls = [self.make_tc(0)]
         resolved = {0: False}
         _inject_feedback_summary(messages, tool_calls, resolved, None)
-        assert len(messages) == 1
-        assert messages[0]["content"] == "hello"
+        assert len(messages) == 2
+        assert messages[1]["role"] == "user"
+        assert "- Rejected: !node list" in messages[1]["content"]
 
-    def test_all_approved_no_injection(self):
-        """All tools approved -> no injection even with feedback."""
+    def test_all_approved_injection(self):
+        """All tools approved -> summary lists all as approved."""
         messages = [{"role": "user", "content": "hello"}]
-        tool_calls = [self.make_tc(0), self.make_tc(1)]
+        tool_calls = [self.make_tc(0, "node.list"), self.make_tc(1, "node.add")]
         resolved = {0: True, 1: True}
         _inject_feedback_summary(messages, tool_calls, resolved, "Global feedback")
-        assert len(messages) == 1
+        assert len(messages) == 2
+        assert "- Approved: !node list" in messages[1]["content"]
+        assert "- Approved: !node add" in messages[1]["content"]
 
     def test_single_rejected_tool_with_feedback(self):
-        """Single rejected tool -> summary injected."""
+        """Single rejected tool -> summary injected with feedback."""
         messages = [{"role": "user", "content": "hello"}]
         tool_calls = [self.make_tc(0, "node.add", '{"label": "Alice"}')]
         resolved = {0: False}
         _inject_feedback_summary(messages, tool_calls, resolved, "Use a different label")
         assert len(messages) == 2
         assert messages[1]["role"] == "user"
-        # _format_command_str uses spaces (not dots) for display
-        assert "Rejected !node add --label Alice" in messages[1]["content"]
-        assert "Use a different label" in messages[1]["content"]
+        assert "- Rejected: !node add --label Alice (feedback: Use a different label)" in messages[1]["content"]
 
     def test_mixed_approval_rejection(self):
-        """Mix of approved and rejected -> only rejected in summary."""
+        """Mix of approved and rejected -> both appear in summary."""
         messages = [{"role": "user", "content": "hello"}]
         tool_calls = [
             self.make_tc(0, "node.add", '{"label": "Alice"}'),
@@ -147,13 +148,12 @@ class TestInjectFeedbackSummary:
             {0: "Wrong label", 1: "N/A"},
         )
         assert len(messages) == 2
-        assert "Rejected !node add --label Alice" in messages[1]["content"]
-        assert "Wrong label" in messages[1]["content"]
-        # Approved tool should not appear
-        assert "search" not in messages[1]["content"]
+        content = messages[1]["content"]
+        assert "- Rejected: !node add --label Alice (feedback: Wrong label)" in content
+        assert "- Approved: !search --q test" in content
 
     def test_multiple_rejected_tools(self):
-        """Multiple rejected tools -> all appear in summary."""
+        """Multiple rejected tools with feedback -> all appear in summary."""
         messages = [{"role": "user", "content": "hello"}]
         tool_calls = [
             self.make_tc(0, "node.add", '{"label": "X"}'),
@@ -167,18 +167,17 @@ class TestInjectFeedbackSummary:
         _inject_feedback_summary(messages, tool_calls, resolved, feedback)
         assert len(messages) == 2
         content = messages[1]["content"]
-        assert "Rejected !node add --label X" in content
-        assert "Label is too short" in content
-        assert "Rejected !triple add --s n1" in content
-        assert "Wrong triple structure" in content
+        assert "- Rejected: !node add --label X (feedback: Label is too short)" in content
+        assert "- Rejected: !triple add --s n1 (feedback: Wrong triple structure)" in content
 
     def test_empty_feedback_dict(self):
-        """Empty feedback dict -> no injection."""
+        """Empty feedback dict -> summary still injected (no feedback text)."""
         messages = [{"role": "user", "content": "hello"}]
-        tool_calls = [self.make_tc(0)]
+        tool_calls = [self.make_tc(0, "node.list")]
         resolved = {0: False}
         _inject_feedback_summary(messages, tool_calls, resolved, {})
-        assert len(messages) == 1
+        assert len(messages) == 2
+        assert "- Rejected: !node list" in messages[1]["content"]
 
 
 class TestResumeExecutionDecisionsKeyType:

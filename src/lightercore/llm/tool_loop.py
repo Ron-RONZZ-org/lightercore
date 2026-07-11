@@ -385,16 +385,12 @@ def _inject_feedback_summary(
     resolved: dict[int, bool],
     feedback: dict[int, str] | str | None,
 ) -> None:
-    """Inject a single summary user message for rejected tools.
+    """Inject a user message summarising the user's decisions on proposed tool calls.
 
-    Instead of injecting per-tool messages (which could break the
-    tool-loop message pattern), this creates ONE user message that
-    summarises rejected tools + feedback, placed before the tool
-    results so the LLM has context.
+    Creates one ``user`` message listing each tool call and whether it was
+    approved or rejected, with any user-provided feedback text. Placed before
+    the tool results so the LLM has context on the next round.
     """
-    if not feedback:
-        return
-
     parts: list[str] = []
     for idx, tc_data in enumerate(tool_calls):
         tc = ToolCall(
@@ -404,19 +400,20 @@ def _inject_feedback_summary(
         )
         path, flags = tc_path(tc)
         approved = resolved.get(idx, False)
-        if approved:
-            continue
-        fb = _resolve_feedback(idx, resolved, feedback)
-        if not fb:
-            continue
         cmd_str = _format_command_str(path.split("."), flags)
-        parts.append(f"- Rejected {cmd_str}: {fb}")
+        if approved:
+            parts.append(f"- Approved: {cmd_str}")
+        else:
+            fb = _resolve_feedback(idx, resolved, feedback)
+            if fb:
+                parts.append(f"- Rejected: {cmd_str} (feedback: {fb})")
+            else:
+                parts.append(f"- Rejected: {cmd_str}")
 
     if not parts:
         return
 
-    summary = "The user reviewed the proposed operations and provided the following feedback:\n\n" + "\n".join(parts) + \
-        "\n\nThe user is waiting for you to adjust your approach based on this feedback."
+    summary = "The user reviewed the proposed operations:\n\n" + "\n".join(parts)
     messages.append({
         "role": "user",
         "content": summary,
