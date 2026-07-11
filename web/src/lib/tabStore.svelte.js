@@ -14,6 +14,20 @@ let _tabs = $state([HOME_TAB]);
 let _activeId = $state(HOME_TAB.id);
 let _nextId = 1;
 
+// ── Derived signals for computed properties ────────────────────────────
+// These MUST be $derived (not plain getters) so that Svelte 5's runtime
+// signal tracking properly propagates changes through the exported
+// ``tabStore`` object's getter chain to subscribing components.
+// See lighterbird PR #197 for the full analysis.
+const _active = $derived.by(
+  () => _tabs.find((t) => t.id === _activeId) || HOME_TAB,
+);
+const _activeIndex = $derived.by(
+  () => _tabs.findIndex((t) => t.id === _activeId),
+);
+const _count = $derived(_tabs.length);
+const _isHome = $derived(_activeId === HOME_TAB.id);
+
 function genId() {
   return `tab-${_nextId++}-${Date.now()}`;
 }
@@ -43,15 +57,15 @@ export const tabStore = {
   },
 
   get active() {
-    return _tabs.find((t) => t.id === _activeId) || HOME_TAB;
+    return _active;
   },
 
   get activeIndex() {
-    return _tabs.findIndex((t) => t.id === _activeId);
+    return _activeIndex;
   },
 
   get count() {
-    return _tabs.length;
+    return _count;
   },
 
   /**
@@ -168,6 +182,6 @@ export const tabStore = {
 
   /** @returns {boolean} true if the home tab is currently active */
   get isHome() {
-    return _activeId === HOME_TAB.id;
+    return _isHome;
   },
 };
