@@ -20,6 +20,16 @@ let _visible = $state(false);
 let _persistent = $state(false);
 let _timer = null;
 
+// ── Derived signals for reactive export through getters ────────────────
+// $derived ensures Svelte 5's runtime properly tracks signal reads through
+// the exported plain-object getter chain. Without this, components reading
+// ``banner.message`` etc. in reactive contexts ($derived, $effect, template)
+// may not re-render when the underlying $state changes.
+const _messageDerived = $derived(_message);
+const _typeDerived = $derived(_type);
+const _visibleDerived = $derived(_visible);
+const _persistentDerived = $derived(_persistent);
+
 function _clearTimer() {
   if (_timer) {
     clearTimeout(_timer);
@@ -28,10 +38,10 @@ function _clearTimer() {
 }
 
 export const banner = {
-  get message() { return _message; },
-  get type() { return _type; },
-  get visible() { return _visible; },
-  get persistent() { return _persistent; },
+  get message() { return _messageDerived; },
+  get type() { return _typeDerived; },
+  get visible() { return _visibleDerived; },
+  get persistent() { return _persistentDerived; },
 
   /**
    * Show a banner notification.
