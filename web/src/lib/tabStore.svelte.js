@@ -132,6 +132,17 @@ export const tabStore = {
   },
 
   /**
+   * Find a tab's ID by its idKey.
+   * Returns the tab's id (string) if found, or null if no tab has that key.
+   * Useful for async callbacks (search, refresh, paginate) that need to
+   * update a specific list tab regardless of which tab is currently active.
+   */
+  findByKey(idKey) {
+    const tab = _tabs.find((t) => t.idKey === idKey && t.id !== HOME_TAB.id);
+    return tab ? tab.id : null;
+  },
+
+  /**
    * Safe update — guards against stale tab references.
    * Only updates if the tab still exists (user may have closed the tab
    * during an async operation).
