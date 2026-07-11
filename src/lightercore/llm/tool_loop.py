@@ -218,6 +218,8 @@ async def run_tool_loop(
                 "type": "confirm_tool",
                 "session_id": session_id,
                 "batch": write_batch,
+                "tokens": write_batch[0]["tokens"],
+                "flags": write_batch[0]["flags"],
                 "message": (
                     f"The LLM wants to perform **{len(write_batch)}** operation(s). "
                     f"Review and approve individually below."

@@ -18,9 +18,21 @@ Example ``~/.config/lighterbird/commands/summarize.md``::
 
 from __future__ import annotations
 
+import asyncio
+import json
+import logging
 import re
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any, Callable
+
+import mistune
+
+from lightercore.llm.base import defs_to_tools
+from lightercore.llm.tool_loop import run_tool_loop
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -254,3 +266,270 @@ def expand_prompt_template(template: str, args: list[str]) -> str:
 def prompt_command_exists(commands_dir: Path, name: str) -> bool:
     """Check if a prompt command file exists (case-insensitive)."""
     return load_prompt_command(commands_dir, name) is not None
+
+
+# ── Execution scaffolding ─────────────────────────────────────────────────────
+
+
+def build_prompt_messages(
+    expanded: str,
+    system_prompt_loader: Callable[[], str],
+) -> list[dict[str, str]]:
+    """Build system + user message list for prompt command execution.
+
+    Args:
+        expanded: The expanded prompt command template.
+        system_prompt_loader: Callable that returns the base system prompt
+            string (e.g. from a user-editable file).
+
+    Returns:
+        ``[{"role": "system", "content": <prompt>},
+          {"role": "user", "content": expanded}]``
+    """
+    return [
+        {"role": "system", "content": system_prompt_loader()},
+        {"role": "user", "content": expanded},
+    ]
+
+
+def parse_tool_domains(
+    template: str,
+    frontmatter_tools: list[str] | None = None,
+) -> set[str] | None:
+    """Parse tool domain restrictions from a prompt command.
+
+    Priority:
+    1. ``frontmatter_tools`` — from YAML frontmatter (already parsed by
+       :func:`_parse_frontmatter` into :attr:`PromptCommand.tools`).
+    2. ``# +tools: domain1, domain2`` comment in the template body.
+    3. ``None`` — include all tools.
+
+    Returns:
+        A set of domain strings, or ``None`` for "all tools".
+    """
+    if frontmatter_tools:
+        domains = {d.strip().lower() for d in frontmatter_tools if d.strip()}
+        return domains if domains else None
+
+    for line in template.split("\n"):
+        stripped = line.strip()
+        match = re.match(r"^#\s*\+tools:\s*(.+)$", stripped, re.IGNORECASE)
+        if match:
+            domains = {d.strip().lower() for d in match.group(1).split(",") if d.strip()}
+            return domains if domains else None
+    return None
+
+
+def filter_defs_by_domain(
+    defs: list[dict[str, Any]],
+    allowed_domains: set[str] | None,
+) -> list[dict[str, Any]]:
+    """Filter flattened command definitions to only include specified domains.
+
+    Excludes bare group nodes (no params, no flags, empty description)
+    which are pure tree scaffolding.
+
+    Args:
+        defs: Flattened command definitions from the project's registry.
+        allowed_domains: If ``None``, return all definitions unchanged.
+
+    Returns:
+        Filtered definition list.
+    """
+    if allowed_domains is None:
+        return defs
+    return [
+        d for d in defs
+        if d["path"][0] in allowed_domains
+        and not (
+            not d.get("params") and not d.get("flags")
+            and not d.get("description", "").strip()
+        )
+    ]
+
+
+# ── Full execution pipeline ───────────────────────────────────────────────────
+
+
+async def execute_prompt_command(
+    *,
+    name: str,
+    args: list[str],
+    commands_dir: Path,
+    provider: Any,
+    system_prompt_loader: Callable[[], str],
+    definitions_loader: Callable[[], list[dict[str, Any]]],
+    dispatch_fn: Callable[[str, dict[str, str]], dict[str, Any]],
+    get_handler_metadata_fn: Callable[[str], dict[str, Any] | None],
+    get_command_level_fn: Callable[[str], int | None],
+    title_prefix: str = "/",
+    max_rounds: int = 20,
+) -> dict[str, Any]:
+    """Execute a prompt command end-to-end.
+
+    Loads the prompt command file, expands the template with positional
+    args, builds messages, filters tool definitions by domain, runs the
+    multi-round tool-calling loop, and returns a response dict ready for
+    the HTTP handler.
+
+    Caller responsibilities:
+    - Handle ``/template`` or other special-case commands before calling
+      this function.
+    - Raise validation errors (name required, not found) from the
+      ``status_code`` key in the return dict.
+    - Handle SSE streaming separately.
+
+    Args:
+        name: Prompt command name (file stem).
+        args: Positional arguments from the user.
+        commands_dir: Path to the ``commands/`` directory.
+        provider: An :class:`~lightercore.llm.protocol.LLMProvider` instance.
+        system_prompt_loader: Callable returning the system prompt string.
+        definitions_loader: Callable returning flattened command definitions.
+        dispatch_fn: Callable ``(path, flags) -> dict`` to execute a command.
+        get_handler_metadata_fn: Callable ``(path) -> dict | None``.
+        get_command_level_fn: Callable ``(path) -> int | None``.
+        title_prefix: Prefix for the response title (e.g. ``"/*"``).
+        max_rounds: Maximum tool-calling iterations.
+
+    Returns:
+        One of:
+        - ``{"type": "chat", "title": ..., "data": {"html": ..., "actions": []}}``
+        - ``{"type": "confirm_tool", "session_id": ..., ...}``
+        - ``{"type": "status", "title": ..., "data": {"message": ...}}``
+        - ``{"status_code": 404, "detail": ..., ...}`` for not-found errors.
+    """
+    # 1. Load and expand
+    cmd = load_prompt_command(commands_dir, name)
+    if cmd is None:
+        available = [c.name for c in list_prompt_commands(commands_dir)]
+        return {
+            "status_code": 404,
+            "detail": (
+                f"Prompt command '{name}' not found. "
+                f"Available: {', '.join(available) or '(none)'}"
+            ),
+        }
+
+    expanded = expand_prompt_template(cmd.template, args)
+
+    # 2. Check provider availability
+    available = getattr(provider, "available", None)
+    if available is None:
+        available = provider.is_available() if hasattr(provider, "is_available") else False
+    if not available:
+        return {
+            "type": "status",
+            "title": f"{title_prefix}{name}",
+            "data": {
+                "message": (
+                    "LLM not configured. "
+                    "Use !llm configure or set up a provider in Settings."
+                ),
+            },
+        }
+
+    # 3. Parse tool domains, load + filter definitions, build messages
+    allowed_domains = parse_tool_domains(cmd.template, frontmatter_tools=cmd.tools)
+    defs = definitions_loader()
+    defs = filter_defs_by_domain(defs, allowed_domains)
+    tools = defs_to_tools(defs) if defs else []
+    messages = build_prompt_messages(expanded, system_prompt_loader)
+
+    # 4. Run multi-round tool loop
+    result = await run_tool_loop(
+        messages=messages,
+        tools=tools,
+        name=f"{title_prefix}{name}",
+        provider=provider,
+        dispatch_fn=dispatch_fn,
+        get_handler_metadata_fn=get_handler_metadata_fn,
+        get_command_level_fn=get_command_level_fn,
+        max_rounds=max_rounds,
+    )
+
+    # 5. Handle confirm_tool pause
+    if isinstance(result, dict) and result.get("type") == "confirm_tool":
+        return result
+
+    # 6. Format chat response
+    reply = result if isinstance(result, str) and result.strip() else None
+    if reply:
+        html = mistune.html(reply)
+        return {
+            "type": "chat",
+            "title": f"{title_prefix}{name}",
+            "data": {"html": html, "actions": []},
+        }
+
+    return {
+        "type": "chat",
+        "title": f"{title_prefix}{name}",
+        "data": {"html": "<p><em>(empty response)</em></p>", "actions": []},
+    }
+
+
+# ── SSE streaming ────────────────────────────────────────────────────────────
+
+
+async def prompt_command_event_stream(
+    name: str,
+    args: list[str],
+    commands_dir: Path,
+    provider: Any,
+    system_prompt_loader: Callable[[], str],
+    timeout: float = 120.0,
+) -> AsyncIterator[str]:
+    """Yield SSE ``data: ...\\n\\n`` events for streaming a prompt command.
+
+    Unlike :func:`execute_prompt_command`, this does NOT use tool-calling
+    — it simply expands the template, sends it to the LLM, and streams the
+    text tokens back as Server-Sent Events.
+
+    Args:
+        name: Prompt command name (file stem).
+        args: Positional arguments from the user.
+        commands_dir: Path to the ``commands/`` directory.
+        provider: An :class:`~lightercore.llm.protocol.LLMProvider` instance.
+        system_prompt_loader: Callable returning the system prompt string.
+        timeout: Maximum seconds to wait for each streaming token.
+
+    Yields:
+        ``data: <json>`` SSE event strings, terminated by ``data: [DONE]``.
+    """
+    # 1. Load and expand
+    cmd = load_prompt_command(commands_dir, name)
+    if cmd is None:
+        available = [c.name for c in list_prompt_commands(commands_dir)]
+        msg = (
+            f"Prompt command '{name}' not found. "
+            f"Available: {', '.join(available) or '(none)'}"
+        )
+        yield f"data: {json.dumps({'token': msg})}\n\n"
+        yield "data: [DONE]\n\n"
+        return
+
+    expanded = expand_prompt_template(cmd.template, args)
+
+    # 2. Check provider
+    available = getattr(provider, "available", None)
+    if available is None:
+        available = provider.is_available() if hasattr(provider, "is_available") else False
+    if not available:
+        yield f"data: {json.dumps({'token': 'LLM not configured.'})}\n\n"
+        yield "data: [DONE]\n\n"
+        return
+
+    # 3. Build messages and stream
+    messages = build_prompt_messages(expanded, system_prompt_loader)
+    try:
+        result = await provider.chat(messages, stream=True)
+        async with asyncio.timeout(timeout):
+            async for token in result:
+                yield f"data: {json.dumps({'token': token})}\n\n"
+    except TimeoutError:
+        yield f"data: {json.dumps({'token': f'Error: LLM streaming timed out after {timeout}s'})}\n\n"
+    except Exception as exc:
+        yield f"data: {json.dumps({'token': f'Error: {exc}'})}\n\n"
+    finally:
+        yield "data: [DONE]\n\n"
