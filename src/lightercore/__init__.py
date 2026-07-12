@@ -11,11 +11,11 @@ Usage::
     from lightercore.exceptions import LighterbirdError
 """
 
-from lightercore import db, paths, exceptions, backup, crud, permissions, llm, system_prompt, prompt_commands, prompt_files, dev_helpers
+from lightercore import db, paths, exceptions, backup, crud, permissions, llm, system_prompt, prompt_commands, prompt_files, dev_helpers, text_utils
 from lightercore.paths import set_app_name
 
 __all__ = [
     "db", "paths", "exceptions", "backup", "crud", "permissions",
-    "llm", "system_prompt", "prompt_commands", "prompt_files", "dev_helpers",
+    "llm", "system_prompt", "prompt_commands", "prompt_files", "dev_helpers", "text_utils",
     "set_app_name",
 ]
