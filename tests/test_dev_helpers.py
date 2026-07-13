@@ -93,48 +93,41 @@ class TestIsSeeded:
 class TestSetupDataDir:
     def test_temp_dir_default(self) -> None:
         """setup_data_dir with None creates a temp dir and sets env vars."""
-        root_dir, data_dir, config_dir, is_temp = setup_data_dir(
+        data_dir, is_temp = setup_data_dir(
             None, app_name="lighterbird",
         )
         try:
+            temp_root = data_dir.parent
             assert is_temp is True
-            assert root_dir.name.startswith("lighterbird-dev-")
-            assert data_dir == root_dir / "data"
-            assert config_dir == root_dir / "config"
+            assert temp_root.name.startswith("lighterbird-dev-")
+            assert data_dir == temp_root / "data"
             assert data_dir.exists()
-            assert config_dir.exists()
             assert os.environ["LIGHTERBIRD_DATA_DIR"] == str(data_dir)
-            assert os.environ["LIGHTERBIRD_CONFIG_DIR"] == str(config_dir)
-            assert os.environ["LIGHTERBIRD_CACHE_DIR"] == str(root_dir / "cache")
-            assert os.environ["LIGHTERBIRD_STATE_DIR"] == str(root_dir / "state")
+            assert "LIGHTERBIRD_CONFIG_DIR" not in os.environ
+            assert os.environ["LIGHTERBIRD_CACHE_DIR"] == str(temp_root / "cache")
+            assert os.environ["LIGHTERBIRD_STATE_DIR"] == str(temp_root / "state")
         finally:
             import shutil
-            shutil.rmtree(root_dir, ignore_errors=True)
+            shutil.rmtree(data_dir.parent, ignore_errors=True)
 
     def test_persistent_dir(self, tmp_path: Path) -> None:
-        """setup_data_dir with a path uses it as the data dir directly
-        (persistent, no ``/data`` appended).
-
-        Config dir is NOT created by setup_data_dir in persistent mode —
-        it is the caller's responsibility (``--local-config``).
-        """
+        """setup_data_dir with a persistent path — config dir is a
+        completely separate concern, never touched by this function."""
         persist = tmp_path / "mydata"
-        root_dir, data_dir, config_dir, is_temp = setup_data_dir(
+        data_dir, is_temp = setup_data_dir(
             str(persist), app_name="semantika",
         )
         try:
             assert is_temp is False
-            assert root_dir == persist.resolve()
-            assert data_dir == root_dir  # The path IS the data dir
+            assert data_dir == persist.resolve()
             assert data_dir.exists()
-            assert config_dir == root_dir / "config"
-            assert not config_dir.exists()  # NOT created in persistent mode
             assert os.environ["SEMANTIKA_DATA_DIR"] == str(data_dir)
-            # CONFIG_DIR env var is NOT set in persistent mode (caller's job)
             assert "SEMANTIKA_CONFIG_DIR" not in os.environ
+            assert os.environ["SEMANTIKA_CACHE_DIR"] == str(data_dir / "cache")
+            assert os.environ["SEMANTIKA_STATE_DIR"] == str(data_dir / "state")
         finally:
             import shutil
-            shutil.rmtree(root_dir, ignore_errors=True)
+            shutil.rmtree(data_dir, ignore_errors=True)
 
     def test_unknown_app_raises(self) -> None:
         with pytest.raises(ValueError, match="Unknown app name"):
@@ -145,17 +138,16 @@ class TestSetupDataDir:
         fake_home = tmp_path / "fakehome"
         fake_home.mkdir()
         with patch.dict(os.environ, {"HOME": str(fake_home)}):
-            root_dir, data_dir, config_dir, is_temp = setup_data_dir(
+            data_dir, is_temp = setup_data_dir(
                 "~/myapp-data", app_name="lighterbird",
             )
             try:
                 assert is_temp is False
-                assert root_dir == fake_home / "myapp-data"
-                assert data_dir == root_dir  # The path IS the data dir
+                assert data_dir == fake_home / "myapp-data"
                 assert data_dir.exists()
             finally:
                 import shutil
-                shutil.rmtree(root_dir, ignore_errors=True)
+                shutil.rmtree(data_dir, ignore_errors=True)
 
 
 class TestStandardDevParser:

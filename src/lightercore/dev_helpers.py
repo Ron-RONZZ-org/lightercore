@@ -27,9 +27,12 @@ Typical project ``dev_main()``::
 
         validate_seed_sources(args)
 
-        root_dir, data_dir, config_dir, is_temp = setup_data_dir(
+        data_dir, is_temp = setup_data_dir(
             args.data_dir, app_name="myapp",
         )
+
+        # Config dir is handled independently (e.g. via --local-config).
+        # setup_data_dir never touches it.
 
         if args.seed_from is not None:
             ...  # restore from archive
@@ -44,7 +47,7 @@ Typical project ``dev_main()``::
         try:
             uvicorn.run(...)
         finally:
-            cleanup_data_dir(root_dir, is_temp, args.keep_data)
+            cleanup_data_dir(data_dir, is_temp, args.keep_data)
 """
 
 from __future__ import annotations
@@ -151,45 +154,42 @@ def is_seeded(data_dir: Path) -> bool:
 # ── Data directory setup ──────────────────────────────────────────────────
 
 
-def _ephemeral_root(app_name: str) -> tuple[Path, bool]:
-    """Create an ephemeral temp directory for a dev server session."""
-    root = Path(tempfile.mkdtemp(prefix=f"{app_name}-dev-"))
-    return root, True
-
-
 def setup_data_dir(
     data_dir_arg: str | None,
     app_name: str,
-) -> tuple[Path, Path, Path, bool]:
+) -> tuple[Path, bool]:
     """Resolve and prepare the data directory for a dev server.
+
+    This function handles **only** the data directory.  Config is a
+    completely separate concern — each project's ``dev_main()`` deals
+    with it independently (typically via a ``--local-config`` flag).
 
     Two modes:
 
     * **Persistent** (``data_dir_arg`` is given) — use the specified path
       as the data directory directly.  Created if missing.  Never cleaned
-      up automatically.  The returned ``config_dir`` is a default suggestion
-      (``<data-dir>/config``) but is **not** created — config is the
-      caller's responsibility (typically via ``--local-config``).
+      up automatically.
     * **Ephemeral** (``data_dir_arg`` is ``None``) — create a temporary
-      directory via ``tempfile.mkdtemp``, with ``data/`` and ``config/``
-      subdirectories inside.  Cleaned up on exit unless ``--keep-data``
-      is passed.
+      directory via ``tempfile.mkdtemp``, with a ``data/`` subdirectory
+      inside.  Cleaned up on exit unless ``--keep-data`` is passed.
 
     Sets the following environment variables (where ``PREFIX`` is derived
     from *app_name*, e.g. ``LIGHTERBIRD`` or ``SEMANTIKA``):
 
-    * ``<PREFIX>_DATA_DIR`` — always set
-    * ``<PREFIX>_CONFIG_DIR`` — set **only** in ephemeral mode (temp dir);
-      in persistent mode the caller is responsible for config.
-    * ``<PREFIX>_CACHE_DIR``
+    * ``<PREFIX>_DATA_DIR``
+    * ``<PREFIX>_CACHE_DIR`` (placed at ``<temp-root>/cache`` or
+      ``<data-dir>/cache`` depending on mode)
     * ``<PREFIX>_STATE_DIR``
+
+    The function **never** sets ``<PREFIX>_CONFIG_DIR`` — config dir is
+    the caller's responsibility.
 
     Args:
         data_dir_arg: Value of ``--data-dir`` (or ``None`` for temp dir).
         app_name: Application name (e.g. ``"lighterbird"``, ``"semantika"``).
 
     Returns:
-        Tuple of ``(root_dir, data_dir, config_dir, is_temp)``.
+        Tuple of ``(data_dir, is_temp)``.
 
     Raises:
         ValueError: If *app_name* is not recognised.
@@ -198,26 +198,25 @@ def setup_data_dir(
 
     if data_dir_arg is not None:
         # ── Persistent mode: caller-supplied data dir ─────────────────
-        root_dir = Path(data_dir_arg).expanduser().resolve()
-        root_dir.mkdir(parents=True, exist_ok=True)
-        is_temp = False
-        data_dir = root_dir
-        config_dir = root_dir / "config"  # suggestion only — NOT created
-    else:
-        # ── Ephemeral mode: temp dir with data/ and config/ siblings ─
-        root_dir, is_temp = _ephemeral_root(app_name)
-        data_dir = root_dir / "data"
-        config_dir = root_dir / "config"
+        data_dir = Path(data_dir_arg).expanduser().resolve()
         data_dir.mkdir(parents=True, exist_ok=True)
-        config_dir.mkdir(parents=True, exist_ok=True)
-        os.environ[f"{prefix}_CONFIG_DIR"] = str(config_dir)
+        is_temp = False
+    else:
+        # ── Ephemeral mode: temp dir with data/ subdir ───────────────
+        temp_root = Path(tempfile.mkdtemp(prefix=f"{app_name}-dev-"))
+        is_temp = True
+        data_dir = temp_root / "data"
+        data_dir.mkdir(parents=True, exist_ok=True)
+
+    # Temp root for env-var derivation differs per mode
+    env_root: Path = data_dir if not is_temp else data_dir.parent
 
     # Set env vars BEFORE any app-level imports resolve paths
     os.environ[f"{prefix}_DATA_DIR"] = str(data_dir)
-    os.environ[f"{prefix}_CACHE_DIR"] = str(root_dir / "cache")
-    os.environ[f"{prefix}_STATE_DIR"] = str(root_dir / "state")
+    os.environ[f"{prefix}_CACHE_DIR"] = str(env_root / "cache")
+    os.environ[f"{prefix}_STATE_DIR"] = str(env_root / "state")
 
-    return root_dir, data_dir, config_dir, is_temp
+    return data_dir, is_temp
 
 
 # ── Argument parser ───────────────────────────────────────────────────────
@@ -334,7 +333,7 @@ def validate_seed_sources(args: argparse.Namespace) -> None:
 
 
 def cleanup_data_dir(
-    root_dir: Path,
+    data_dir: Path,
     is_temp: bool,
     keep_data: bool,
     *,
@@ -343,13 +342,13 @@ def cleanup_data_dir(
 ) -> None:
     """Clean up the data directory after the server stops.
 
-    * **Persistent dir** (``is_temp=False``): logs the path, never deletes.
-    * **Temp dir** (``is_temp=True``) with ``keep_data=True``: logs the path.
-    * **Temp dir** with ``keep_data=False``: removes the tree via
-      ``shutil.rmtree``.
+    Only deletes the *data_dir* itself when ephemeral (temp) mode is used
+    and ``keep_data`` is ``False``.  Persistent dirs are never deleted.
+    The caller is responsible for cleaning up any other temp dirs it
+    created (e.g. a temp config dir from ``--local-config``).
 
     Args:
-        root_dir: Root directory (returned by ``setup_data_dir``).
+        data_dir: Data directory (returned by :func:`setup_data_dir`).
         is_temp: Whether this is an ephemeral temp directory.
         keep_data: Whether to preserve data.
         quiet: Suppress informational output.
@@ -357,13 +356,13 @@ def cleanup_data_dir(
     """
     if not is_temp:
         if not quiet:
-            print(f"{log_prefix} Data preserved at: {root_dir}")
+            print(f"{log_prefix} Data preserved at: {data_dir}")
         return
 
     if keep_data:
         if not quiet:
-            print(f"{log_prefix} Data preserved at: {root_dir}")
+            print(f"{log_prefix} Data preserved at: {data_dir}")
     else:
         if not quiet:
-            print(f"{log_prefix} Cleaning up: {root_dir}")
-        shutil.rmtree(root_dir, ignore_errors=True)
+            print(f"{log_prefix} Cleaning up: {data_dir}")
+        shutil.rmtree(data_dir, ignore_errors=True)
