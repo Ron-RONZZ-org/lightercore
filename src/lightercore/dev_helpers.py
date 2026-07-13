@@ -160,13 +160,14 @@ def setup_data_dir(
     Two modes:
 
     * **Persistent** (``data_dir_arg`` is given) — use the specified path
-      as the root.  Created if missing.  Never cleaned up automatically.
+      as the data directory directly.  Created if missing.  Never cleaned
+      up automatically.  A ``config/`` subdirectory is created inside it.
     * **Ephemeral** (``data_dir_arg`` is ``None``) — create a temporary
-      directory via ``tempfile.mkdtemp``.  Cleaned up on exit unless
-      ``--keep-data`` is passed.
+      directory via ``tempfile.mkdtemp``, with ``data/`` and ``config/``
+      subdirectories inside.  Cleaned up on exit unless ``--keep-data``
+      is passed.
 
-    Creates ``data/`` and ``config/`` subdirectories inside the root, and
-    sets the following environment variables (where ``PREFIX`` is derived
+    Sets the following environment variables (where ``PREFIX`` is derived
     from *app_name*, e.g. ``LIGHTERBIRD`` or ``SEMANTIKA``):
 
     * ``<PREFIX>_DATA_DIR``
@@ -190,11 +191,12 @@ def setup_data_dir(
         root_dir = Path(data_dir_arg).expanduser().resolve()
         root_dir.mkdir(parents=True, exist_ok=True)
         is_temp = False
+        data_dir = root_dir  # The user-supplied path IS the data dir (no /data appended)
     else:
         root_dir = Path(tempfile.mkdtemp(prefix=f"{app_name}-dev-"))
         is_temp = True
+        data_dir = root_dir / "data"  # Temp dir keeps the /data subdir
 
-    data_dir = root_dir / "data"
     config_dir = root_dir / "config"
     data_dir.mkdir(parents=True, exist_ok=True)
     config_dir.mkdir(parents=True, exist_ok=True)

@@ -112,7 +112,8 @@ class TestSetupDataDir:
             shutil.rmtree(root_dir, ignore_errors=True)
 
     def test_persistent_dir(self, tmp_path: Path) -> None:
-        """setup_data_dir with a path uses it (persistent)."""
+        """setup_data_dir with a path uses it as the data dir directly
+        (persistent, no ``/data`` appended)."""
         persist = tmp_path / "mydata"
         root_dir, data_dir, config_dir, is_temp = setup_data_dir(
             str(persist), app_name="semantika",
@@ -120,7 +121,9 @@ class TestSetupDataDir:
         try:
             assert is_temp is False
             assert root_dir == persist.resolve()
+            assert data_dir == root_dir  # The path IS the data dir
             assert data_dir.exists()
+            assert config_dir == root_dir / "config"
             assert config_dir.exists()
             assert os.environ["SEMANTIKA_DATA_DIR"] == str(data_dir)
             assert os.environ["SEMANTIKA_CONFIG_DIR"] == str(config_dir)
@@ -143,6 +146,7 @@ class TestSetupDataDir:
             try:
                 assert is_temp is False
                 assert root_dir == fake_home / "myapp-data"
+                assert data_dir == root_dir  # The path IS the data dir
                 assert data_dir.exists()
             finally:
                 import shutil
