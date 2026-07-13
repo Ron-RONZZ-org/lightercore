@@ -89,22 +89,6 @@ class TestIsSeeded:
         (tmp_path / "sub").mkdir()
         assert is_seeded(tmp_path) is True
 
-    def test_only_config_subdir(self, tmp_path: Path) -> None:
-        """A dir containing only a ``config/`` subdirectory is NOT seeded.
-
-        This matches the persistent ``--data-dir`` mode where
-        ``setup_data_dir`` creates ``config/`` inside the data dir
-        *before* the seeding check.
-        """
-        (tmp_path / "config").mkdir()
-        assert is_seeded(tmp_path) is False
-
-    def test_config_plus_real_content(self, tmp_path: Path) -> None:
-        """A dir containing ``config/`` AND real seed data IS seeded."""
-        (tmp_path / "config").mkdir()
-        (tmp_path / "lighterbird.db").write_text("")
-        assert is_seeded(tmp_path) is True
-
 
 class TestSetupDataDir:
     def test_temp_dir_default(self) -> None:
@@ -129,7 +113,11 @@ class TestSetupDataDir:
 
     def test_persistent_dir(self, tmp_path: Path) -> None:
         """setup_data_dir with a path uses it as the data dir directly
-        (persistent, no ``/data`` appended)."""
+        (persistent, no ``/data`` appended).
+
+        Config dir is NOT created by setup_data_dir in persistent mode —
+        it is the caller's responsibility (``--local-config``).
+        """
         persist = tmp_path / "mydata"
         root_dir, data_dir, config_dir, is_temp = setup_data_dir(
             str(persist), app_name="semantika",
@@ -140,9 +128,10 @@ class TestSetupDataDir:
             assert data_dir == root_dir  # The path IS the data dir
             assert data_dir.exists()
             assert config_dir == root_dir / "config"
-            assert config_dir.exists()
+            assert not config_dir.exists()  # NOT created in persistent mode
             assert os.environ["SEMANTIKA_DATA_DIR"] == str(data_dir)
-            assert os.environ["SEMANTIKA_CONFIG_DIR"] == str(config_dir)
+            # CONFIG_DIR env var is NOT set in persistent mode (caller's job)
+            assert "SEMANTIKA_CONFIG_DIR" not in os.environ
         finally:
             import shutil
             shutil.rmtree(root_dir, ignore_errors=True)

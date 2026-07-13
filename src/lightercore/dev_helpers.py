@@ -141,25 +141,20 @@ def _resolve_project_root(script_path: str | Path) -> Path:
 def is_seeded(data_dir: Path) -> bool:
     """Check if *data_dir* already has content (i.e. was seeded before).
 
-    Returns ``True`` if the directory exists and contains files or
-    subdirectories beyond the always-present ``config/`` subdirectory
-    (which :func:`setup_data_dir` creates inside the data dir in
-    persistent mode).
-
-    This avoids a false positive when ``--data-dir`` is used: the
-    ``config/`` subdirectory is created by ``setup_data_dir`` *before*
-    the seeding check, and without this exclusion the empty + ``config/``
-    state would be mistaken for already-seeded.
+    Returns ``True`` if the directory exists and is non-empty.
     """
     if not data_dir.is_dir():
         return False
-    for entry in data_dir.iterdir():
-        if entry.name != "config":
-            return True
-    return False
+    return any(data_dir.iterdir())
 
 
 # ── Data directory setup ──────────────────────────────────────────────────
+
+
+def _ephemeral_root(app_name: str) -> tuple[Path, bool]:
+    """Create an ephemeral temp directory for a dev server session."""
+    root = Path(tempfile.mkdtemp(prefix=f"{app_name}-dev-"))
+    return root, True
 
 
 def setup_data_dir(
@@ -172,7 +167,9 @@ def setup_data_dir(
 
     * **Persistent** (``data_dir_arg`` is given) — use the specified path
       as the data directory directly.  Created if missing.  Never cleaned
-      up automatically.  A ``config/`` subdirectory is created inside it.
+      up automatically.  The returned ``config_dir`` is a default suggestion
+      (``<data-dir>/config``) but is **not** created — config is the
+      caller's responsibility (typically via ``--local-config``).
     * **Ephemeral** (``data_dir_arg`` is ``None``) — create a temporary
       directory via ``tempfile.mkdtemp``, with ``data/`` and ``config/``
       subdirectories inside.  Cleaned up on exit unless ``--keep-data``
@@ -181,8 +178,9 @@ def setup_data_dir(
     Sets the following environment variables (where ``PREFIX`` is derived
     from *app_name*, e.g. ``LIGHTERBIRD`` or ``SEMANTIKA``):
 
-    * ``<PREFIX>_DATA_DIR``
-    * ``<PREFIX>_CONFIG_DIR``
+    * ``<PREFIX>_DATA_DIR`` — always set
+    * ``<PREFIX>_CONFIG_DIR`` — set **only** in ephemeral mode (temp dir);
+      in persistent mode the caller is responsible for config.
     * ``<PREFIX>_CACHE_DIR``
     * ``<PREFIX>_STATE_DIR``
 
@@ -199,22 +197,23 @@ def setup_data_dir(
     prefix = _app_env_prefix(app_name)
 
     if data_dir_arg is not None:
+        # ── Persistent mode: caller-supplied data dir ─────────────────
         root_dir = Path(data_dir_arg).expanduser().resolve()
         root_dir.mkdir(parents=True, exist_ok=True)
         is_temp = False
-        data_dir = root_dir  # The user-supplied path IS the data dir (no /data appended)
+        data_dir = root_dir
+        config_dir = root_dir / "config"  # suggestion only — NOT created
     else:
-        root_dir = Path(tempfile.mkdtemp(prefix=f"{app_name}-dev-"))
-        is_temp = True
-        data_dir = root_dir / "data"  # Temp dir keeps the /data subdir
-
-    config_dir = root_dir / "config"
-    data_dir.mkdir(parents=True, exist_ok=True)
-    config_dir.mkdir(parents=True, exist_ok=True)
+        # ── Ephemeral mode: temp dir with data/ and config/ siblings ─
+        root_dir, is_temp = _ephemeral_root(app_name)
+        data_dir = root_dir / "data"
+        config_dir = root_dir / "config"
+        data_dir.mkdir(parents=True, exist_ok=True)
+        config_dir.mkdir(parents=True, exist_ok=True)
+        os.environ[f"{prefix}_CONFIG_DIR"] = str(config_dir)
 
     # Set env vars BEFORE any app-level imports resolve paths
     os.environ[f"{prefix}_DATA_DIR"] = str(data_dir)
-    os.environ[f"{prefix}_CONFIG_DIR"] = str(config_dir)
     os.environ[f"{prefix}_CACHE_DIR"] = str(root_dir / "cache")
     os.environ[f"{prefix}_STATE_DIR"] = str(root_dir / "state")
 
