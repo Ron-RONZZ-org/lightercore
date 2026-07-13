@@ -89,6 +89,22 @@ class TestIsSeeded:
         (tmp_path / "sub").mkdir()
         assert is_seeded(tmp_path) is True
 
+    def test_only_config_subdir(self, tmp_path: Path) -> None:
+        """A dir containing only a ``config/`` subdirectory is NOT seeded.
+
+        This matches the persistent ``--data-dir`` mode where
+        ``setup_data_dir`` creates ``config/`` inside the data dir
+        *before* the seeding check.
+        """
+        (tmp_path / "config").mkdir()
+        assert is_seeded(tmp_path) is False
+
+    def test_config_plus_real_content(self, tmp_path: Path) -> None:
+        """A dir containing ``config/`` AND real seed data IS seeded."""
+        (tmp_path / "config").mkdir()
+        (tmp_path / "lighterbird.db").write_text("")
+        assert is_seeded(tmp_path) is True
+
 
 class TestSetupDataDir:
     def test_temp_dir_default(self) -> None:

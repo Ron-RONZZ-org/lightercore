@@ -141,11 +141,22 @@ def _resolve_project_root(script_path: str | Path) -> Path:
 def is_seeded(data_dir: Path) -> bool:
     """Check if *data_dir* already has content (i.e. was seeded before).
 
-    Returns ``True`` if the directory exists and is non-empty.
+    Returns ``True`` if the directory exists and contains files or
+    subdirectories beyond the always-present ``config/`` subdirectory
+    (which :func:`setup_data_dir` creates inside the data dir in
+    persistent mode).
+
+    This avoids a false positive when ``--data-dir`` is used: the
+    ``config/`` subdirectory is created by ``setup_data_dir`` *before*
+    the seeding check, and without this exclusion the empty + ``config/``
+    state would be mistaken for already-seeded.
     """
     if not data_dir.is_dir():
         return False
-    return any(data_dir.iterdir())
+    for entry in data_dir.iterdir():
+        if entry.name != "config":
+            return True
+    return False
 
 
 # ── Data directory setup ──────────────────────────────────────────────────
