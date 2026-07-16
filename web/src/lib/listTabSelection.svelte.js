@@ -110,6 +110,7 @@ export function createSelectionManager(getItems, onOpen, onDeleteSelected, onRef
       anchorIndex = -1;
     } else if (getItems().length > 0 && focusedIndex === -1) {
       focusedIndex = 0;
+      anchorIndex = 0;
     }
   }
 
@@ -147,7 +148,10 @@ export function createSelectionManager(getItems, onOpen, onDeleteSelected, onRef
       } else {
         toggleItem(key);
         const idx = getItems().findIndex((it) => getKey(it) === key);
-        if (idx >= 0 && anchorIndex < 0) anchorIndex = idx;
+        if (idx >= 0) {
+          anchorIndex = idx;
+          focusedIndex = idx;
+        }
       }
     } else if (onOpen) {
       onOpen(key);
@@ -223,7 +227,6 @@ export function createSelectionManager(getItems, onOpen, onDeleteSelected, onRef
     function navRow(idx) {
       if (shift && anchorIndex >= 0) selectRange(anchorIndex, idx);
       focusRow(idx);
-      if (!shift) anchorIndex = idx;
     }
 
     switch (e.key) {
@@ -247,13 +250,11 @@ export function createSelectionManager(getItems, onOpen, onDeleteSelected, onRef
         e.preventDefault();
         if (shift && anchorIndex >= 0) selectRange(anchorIndex, 0);
         focusRow(0);
-        if (!shift) anchorIndex = 0;
         return;
       case "End":
         e.preventDefault();
         if (shift && anchorIndex >= 0) selectRange(anchorIndex, items.length - 1);
         focusRow(items.length - 1);
-        if (!shift) anchorIndex = items.length - 1;
         return;
       case " ":
         e.preventDefault();
@@ -275,6 +276,7 @@ export function createSelectionManager(getItems, onOpen, onDeleteSelected, onRef
     set selectionMode(v) { selectionMode = v; },
     get selectedKeys() { return selectedKeys; },
     get focusedIndex() { return focusedIndex; },
+    get anchorIndex() { return anchorIndex; },
     get numSelected() { return numSelected; },
     get confirmDelete() { return confirmDelete; },
     set confirmDelete(v) { confirmDelete = v; },

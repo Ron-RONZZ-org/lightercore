@@ -205,4 +205,117 @@ describe("createSelectionManager", () => {
     sel.handleKeydown(e);
     expect(sel.isSelected("b")).toBe(true);
   });
+
+  // ── Anchor management ──────────────────────────────────────────
+
+  it("toggleSelectionMode sets anchorIndex on entry", () => {
+    sel.toggleSelectionMode();
+    expect(sel.selectionMode).toBe(true);
+    expect(sel.focusedIndex).toBe(0);
+    // With empty list, focusedIndex and anchorIndex remain -1
+    sel = createSelectionManager(() => [], vi.fn(), vi.fn(), vi.fn());
+    sel.toggleSelectionMode();
+    expect(sel.focusedIndex).toBe(-1);
+    expect(sel.anchorIndex).toBe(-1);
+  });
+
+  it("plain navigation preserves anchorIndex", () => {
+    sel.toggleSelectionMode();
+    // anchorIndex = 0 on entry
+
+    // Click item "a" to set anchor and select it
+    sel.handleRowClick({ shiftKey: false }, "a");
+    expect(sel.isSelected("a")).toBe(true);
+
+    // Press END (no shift) — should move focus but NOT move anchor
+    let e = { key: "End", ctrlKey: false, metaKey: false, altKey: false, preventDefault: vi.fn(), target: { tagName: "DIV" }, shiftKey: false };
+    sel.handleKeydown(e);
+    expect(sel.focusedIndex).toBe(2);
+    expect(sel.anchorIndex).toBe(0); // anchor preserved
+
+    // Press Home (no shift) — focus moves, anchor stays
+    e = { key: "Home", ctrlKey: false, metaKey: false, altKey: false, preventDefault: vi.fn(), target: { tagName: "DIV" }, shiftKey: false };
+    sel.handleKeydown(e);
+    expect(sel.focusedIndex).toBe(0);
+    expect(sel.anchorIndex).toBe(0); // anchor still at 0
+
+    // ArrowDown (no shift) — focus moves, anchor stays
+    e = { key: "ArrowDown", ctrlKey: false, metaKey: false, altKey: false, preventDefault: vi.fn(), target: { tagName: "DIV" }, shiftKey: false };
+    sel.handleKeydown(e);
+    expect(sel.focusedIndex).toBe(1);
+    expect(sel.anchorIndex).toBe(0); // anchor still at 0
+  });
+
+  it("shift+click after plain END selects from anchor to end", () => {
+    sel.toggleSelectionMode();
+    // anchorIndex = 0 on entry
+
+    // Click item "a" sets anchor
+    sel.handleRowClick({ shiftKey: false }, "a");
+    expect(sel.isSelected("a")).toBe(true);
+
+    // Press END (no shift) — focus moves to last, anchor stays at 0
+    let e = { key: "End", ctrlKey: false, metaKey: false, altKey: false, preventDefault: vi.fn(), target: { tagName: "DIV" }, shiftKey: false };
+    sel.handleKeydown(e);
+
+    // Shift+click last item — should select items 0 through 2 (a, b, c)
+    sel.handleRowClick({ shiftKey: true }, "c");
+    expect(sel.isSelected("a")).toBe(true);
+    expect(sel.isSelected("b")).toBe(true);
+    expect(sel.isSelected("c")).toBe(true);
+  });
+
+  it("shift+End extends selection from anchor to end", () => {
+    sel.toggleSelectionMode();
+    // anchorIndex = 0 on entry
+
+    // Click item "b" (index 1) to change focus and anchor
+    sel.handleRowClick({ shiftKey: false }, "b");
+    expect(sel.isSelected("b")).toBe(true);
+
+    // Shift+End — should extend from anchor (index 1) to end (index 2)
+    const e = { key: "End", ctrlKey: false, metaKey: false, altKey: false, preventDefault: vi.fn(), target: { tagName: "DIV" }, shiftKey: true };
+    sel.handleKeydown(e);
+    expect(sel.isSelected("b")).toBe(true);
+    expect(sel.isSelected("c")).toBe(true);
+    expect(sel.isSelected("a")).toBe(false); // not in range 1-2
+  });
+
+  it("shift+ArrowDown extends selection from anchor", () => {
+    sel.toggleSelectionMode();
+    // anchorIndex = 0 on entry
+
+    // Click item "a" at index 0
+    sel.handleRowClick({ shiftKey: false }, "a");
+    expect(sel.isSelected("a")).toBe(true);
+
+    // Shift+ArrowDown — select from 0 to 1
+    const e = { key: "ArrowDown", ctrlKey: false, metaKey: false, altKey: false, preventDefault: vi.fn(), target: { tagName: "DIV" }, shiftKey: true };
+    sel.handleKeydown(e);
+    expect(sel.isSelected("a")).toBe(true);
+    expect(sel.isSelected("b")).toBe(true);
+    expect(sel.isSelected("c")).toBe(false);
+  });
+
+  it("shift+ArrowUp selects from anchor upward", () => {
+    // Navigate to item at index 2 first by arrow keys
+    sel.toggleSelectionMode();
+    // Click item "c" at index 2
+    sel.handleRowClick({ shiftKey: false }, "c");
+
+    // Shift+ArrowUp — select from anchor (2) to 1
+    const e = { key: "ArrowUp", ctrlKey: false, metaKey: false, altKey: false, preventDefault: vi.fn(), target: { tagName: "DIV" }, shiftKey: true };
+    sel.handleKeydown(e);
+    expect(sel.isSelected("c")).toBe(true);
+    expect(sel.isSelected("b")).toBe(true);
+    expect(sel.isSelected("a")).toBe(false); // not in range 1-2
+  });
+
+  it("empty list does not crash on selection mode entry", () => {
+    sel = createSelectionManager(() => [], vi.fn(), vi.fn(), vi.fn());
+    sel.toggleSelectionMode();
+    expect(sel.selectionMode).toBe(true);
+    expect(sel.focusedIndex).toBe(-1);
+    expect(sel.anchorIndex).toBe(-1);
+  });
 });
