@@ -32,6 +32,20 @@ Context resolution order (highest priority first):
 
 > **Dual-build architecture**: The `web/` subdirectory is a standalone npm package (`@lightercore/ui`) with its own `package.json` and `vitest.config.js`. The Python package (Hatchling, `src/lightercore/`) and JS package (Vite, `web/`) are fully independent build systems sharing the same repo.
 
+### Disk Locations (absolute paths)
+
+All sibling repos live under `/home/rongzhou/kodo/autish/`:
+
+| Project | Absolute path |
+|---------|--------------|
+| **semantika** | `/home/rongzhou/kodo/autish/semantika/` |
+| **lighterbird** | `/home/rongzhou/kodo/autish/lighterbird/` |
+| **lightercore** | `/home/rongzhou/kodo/autish/lightercore/` — this repo |
+| **A-semantika** | `/home/rongzhou/kodo/autish/A-semantika/` |
+| **A-core** | `/home/rongzhou/kodo/autish/A-core/` |
+
+Relative references in this file (e.g., `../lighterbird`) resolve correctly because all repos share the same parent directory.
+
 ---
 
 ## Source Tree Structure
