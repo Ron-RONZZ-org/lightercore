@@ -15,12 +15,15 @@ import pytest
 
 from lightercore.llm.tool_loop import (
     _format_command_str,
+    _get_tool_level,
     _inject_feedback_summary,
     _resolve_feedback,
     resume_execution,
+    run_tool_loop,
     _pending_executions,
 )
-from lightercore.llm.base import ToolCall
+from lightercore.llm.base import ChatResult, ToolCall
+from lightercore.permissions import PermissionLevel
 
 
 class TestFormatCommandStr:
@@ -290,3 +293,299 @@ class TestResumeExecutionDecisionsKeyType:
             session_id, {0: True}
         )
         mock_dispatch.assert_called_once()
+
+
+# ── get_tool_level_fn support ────────────────────────────────────────
+
+
+class TestGetToolLevel:
+    """Unit tests for _get_tool_level helper."""
+
+    def test_tool_level_fn_takes_priority(self):
+        """get_tool_level_fn overrides CLI registry when it returns a level."""
+        result = _get_tool_level(
+            "email.send",
+            get_tool_level_fn=lambda p: PermissionLevel.WRITE,
+            get_handler_metadata_fn=lambda p: None,
+            get_command_level_fn=lambda p: None,
+        )
+        assert result == PermissionLevel.WRITE
+
+    def test_tool_level_fn_provided_returns_its_value(self):
+        """When get_tool_level_fn is provided, its return value is authoritative (no fallback)."""
+        result = _get_tool_level(
+            "todo.add",
+            get_tool_level_fn=lambda p: None,  # callback exists but returns None
+            get_handler_metadata_fn=lambda p: {"description": "Add todo"},
+            get_command_level_fn=lambda p: PermissionLevel.WRITE,
+        )
+        # The callback is the single source of truth — no CLI fallback
+        assert result is None
+
+    def test_tool_level_fn_prevents_cli_override(self):
+        """get_tool_level_fn returning READ prevents CLI WRITE from gating."""
+        result = _get_tool_level(
+            "todo.add",
+            get_tool_level_fn=lambda p: PermissionLevel.READ,
+            get_handler_metadata_fn=lambda p: {"description": "Add todo"},
+            get_command_level_fn=lambda p: PermissionLevel.WRITE,
+        )
+        assert result == PermissionLevel.READ
+
+    def test_no_tool_fn_cli_handler(self):
+        """No get_tool_level_fn, CLI has handler → use CLI level."""
+        result = _get_tool_level(
+            "email.list",
+            get_tool_level_fn=None,
+            get_handler_metadata_fn=lambda p: {"description": "List"},
+            get_command_level_fn=lambda p: PermissionLevel.READ,
+        )
+        assert result == PermissionLevel.READ
+
+    def test_no_tool_fn_no_handler(self):
+        """No get_tool_level_fn, no CLI handler → None."""
+        result = _get_tool_level(
+            "llm.custom_tool",
+            get_tool_level_fn=None,
+            get_handler_metadata_fn=lambda p: None,
+            get_command_level_fn=lambda p: None,
+        )
+        assert result is None
+
+    def test_both_fn_and_handler_get_tool_wins(self):
+        """Both get_tool_level_fn and CLI handler present → tool_fn wins."""
+        result = _get_tool_level(
+            "email.list",
+            get_tool_level_fn=lambda p: PermissionLevel.DESTRUCTIVE,
+            get_handler_metadata_fn=lambda p: {"description": "List"},
+            get_command_level_fn=lambda p: PermissionLevel.READ,
+        )
+        assert result == PermissionLevel.DESTRUCTIVE
+
+
+class TestRunToolLoopGetToolLevelFn:
+    """run_tool_loop with get_tool_level_fn callback."""
+
+    def _make_mock_provider(self, responses: list[ChatResult]) -> MagicMock:
+        mock = MagicMock()
+        mock.chat_with_tools = AsyncMock()
+        mock.chat_with_tools.side_effect = responses
+        return mock
+
+    def _make_meta_fn(self, known: set[str] | None = None):
+        known = known or set()
+
+        def meta_fn(path: str) -> dict | None:
+            if path in known:
+                return {"description": f"Handler for {path}"}
+            return None
+        return meta_fn
+
+    def _make_level_fn(self, levels: dict[str, int] | None = None):
+        levels = levels or {}
+
+        def level_fn(path: str) -> int | None:
+            return levels.get(path, None)
+        return level_fn
+
+    async def test_llm_tool_write_gated(self):
+        """LLM tool with WRITE level via get_tool_level_fn is gated."""
+        mock = self._make_mock_provider([
+            ChatResult(
+                content=None,
+                tool_calls=[
+                    ToolCall(id="c1", function={"name": "email_send", "arguments": '{"to": "a@b.com"}'}),
+                ],
+            ),
+        ])
+
+        result = await run_tool_loop(
+            messages=[{"role": "user", "content": "send email"}],
+            tools=[],
+            name="test",
+            provider=mock,
+            dispatch_fn=lambda p, f: {"status": "ok"},
+            get_handler_metadata_fn=self._make_meta_fn(),  # NOT in CLI registry
+            get_command_level_fn=self._make_level_fn(),
+            get_tool_level_fn=lambda p: PermissionLevel.WRITE,  # LLM tool registry says WRITE
+        )
+
+        assert isinstance(result, dict)
+        assert result["type"] == "confirm_tool"
+        assert len(result["batch"]) == 1
+        assert result["batch"][0]["tokens"] == ["email", "send"]
+
+    async def test_llm_tool_destructive_gated(self):
+        """LLM tool with DESTRUCTIVE level is gated."""
+        mock = self._make_mock_provider([
+            ChatResult(
+                content=None,
+                tool_calls=[
+                    ToolCall(id="c1", function={"name": "email_trash", "arguments": '{"uuid": "abc"}'}),
+                ],
+            ),
+        ])
+
+        result = await run_tool_loop(
+            messages=[{"role": "user", "content": "trash email"}],
+            tools=[],
+            name="test",
+            provider=mock,
+            dispatch_fn=lambda p, f: {"status": "ok"},
+            get_handler_metadata_fn=self._make_meta_fn(),
+            get_command_level_fn=self._make_level_fn(),
+            get_tool_level_fn=lambda p: PermissionLevel.DESTRUCTIVE,
+        )
+
+        assert isinstance(result, dict)
+        assert result["type"] == "confirm_tool"
+        assert len(result["batch"]) == 1
+
+    async def test_llm_tool_read_executes_immediately(self):
+        """LLM tool with READ level passes without confirmation."""
+        mock = self._make_mock_provider([
+            ChatResult(
+                content=None,
+                tool_calls=[
+                    ToolCall(id="c1", function={"name": "email_find", "arguments": '{"query": "hello"}'}),
+                ],
+            ),
+            ChatResult(content="Found matching emails."),
+        ])
+
+        dispatched = []
+
+        def dispatch(path, flags):
+            dispatched.append((path, flags))
+            return {"status": "ok", "count": 5}
+
+        result = await run_tool_loop(
+            messages=[{"role": "user", "content": "find emails"}],
+            tools=[],
+            name="test",
+            provider=mock,
+            dispatch_fn=dispatch,
+            get_handler_metadata_fn=self._make_meta_fn(),
+            get_command_level_fn=self._make_level_fn(),
+            get_tool_level_fn=lambda p: PermissionLevel.READ,
+        )
+
+        assert result == "Found matching emails."
+        assert dispatched == [("email.find", {"query": "hello"})]
+
+    async def test_no_tool_level_fn_unknown_tool_executes(self):
+        """No get_tool_level_fn + no CLI handler → tool executes (backward compat)."""
+        mock = self._make_mock_provider([
+            ChatResult(
+                content=None,
+                tool_calls=[
+                    ToolCall(id="c1", function={"name": "unknown_tool", "arguments": "{}"}),
+                ],
+            ),
+            ChatResult(content="Done."),
+        ])
+
+        dispatched = []
+
+        def dispatch(path, flags):
+            dispatched.append((path, flags))
+            return {"status": "ok"}
+
+        result = await run_tool_loop(
+            messages=[{"role": "user", "content": "do thing"}],
+            tools=[],
+            name="test",
+            provider=mock,
+            dispatch_fn=dispatch,
+            get_handler_metadata_fn=self._make_meta_fn(),  # NOT in CLI
+            get_command_level_fn=self._make_level_fn(),     # no levels
+            get_tool_level_fn=None,                          # NOT provided
+        )
+
+        assert result == "Done."
+        # tc_path converts _ to . — "unknown_tool" becomes "unknown.tool"
+        assert dispatched == [("unknown.tool", {})]
+
+
+class TestResumeExecutionGetToolLevelFn:
+    """Resume execution preserves get_tool_level_fn through pause/continue."""
+
+    @pytest.fixture(autouse=True)
+    def cleanup_pending(self):
+        _pending_executions.clear()
+        yield
+        _pending_executions.clear()
+
+    def _make_session(self, tool_name: str, tool_level: PermissionLevel | None = None) -> str:
+        import uuid
+        session_id = str(uuid.uuid4())
+        state = {
+            "messages": [
+                {"role": "user", "content": "do it"},
+                {"role": "assistant", "content": None, "tool_calls": [
+                    {"id": "c1", "type": "function", "function": {"name": tool_name, "arguments": "{}"}},
+                ]},
+            ],
+            "tool_calls": [
+                {"id": "c1", "type": "function", "function": {"name": tool_name, "arguments": "{}"}},
+            ],
+            "tools": [],
+            "name": "test",
+            "write_paths": {tuple(tool_name.split(".")): {"tokens": tool_name.split("."), "flags": {}}},
+        }
+        if tool_level is not None:
+            state["get_tool_level_fn"] = lambda p: tool_level
+        _pending_executions[session_id] = state
+        return session_id
+
+    async def test_resume_uses_stored_get_tool_level_fn(self):
+        """Resume uses the get_tool_level_fn stored in session state."""
+        mock_provider = MagicMock()
+        mock_provider.chat_with_tools = AsyncMock(return_value=ChatResult(content="Done."))
+        dispatch = MagicMock(return_value={"status": "ok"})
+
+        session_id = self._make_session("email.send", tool_level=PermissionLevel.WRITE)
+
+        with patch(
+            "lightercore.llm.tool_loop.run_tool_loop",
+            new_callable=AsyncMock,
+            return_value="Done.",
+        ):
+            result = await resume_execution(
+                session_id=session_id,
+                decisions={0: True},
+                provider=mock_provider,
+                dispatch_fn=dispatch,
+                get_handler_metadata_fn=lambda p: None,  # NOT in CLI
+                get_command_level_fn=lambda p: None,
+                # Don't pass get_tool_level_fn — should use stored value
+            )
+
+        dispatch.assert_called_once()
+
+    async def test_resume_explicit_param_overrides_stored(self):
+        """Explicit get_tool_level_fn param overrides stored state value."""
+        mock_provider = MagicMock()
+        mock_provider.chat_with_tools = AsyncMock(return_value=ChatResult(content="Done."))
+        dispatch = MagicMock(return_value={"status": "ok"})
+
+        session_id = self._make_session("email.send", tool_level=PermissionLevel.DESTRUCTIVE)
+
+        with patch(
+            "lightercore.llm.tool_loop.run_tool_loop",
+            new_callable=AsyncMock,
+            return_value="Done.",
+        ):
+            await resume_execution(
+                session_id=session_id,
+                decisions={0: True},
+                provider=mock_provider,
+                dispatch_fn=dispatch,
+                get_handler_metadata_fn=lambda p: None,
+                get_command_level_fn=lambda p: None,
+                get_tool_level_fn=lambda p: PermissionLevel.READ,  # override
+            )
+
+        # The explicit READ-level fn changes the tool to READ, which is
+        # skipped on resume (READ tools already executed in initial loop).
+        dispatch.assert_not_called()
