@@ -12,6 +12,7 @@ The `lightercore.llm` subpackage provides shared LLM infrastructure consumed by 
 | `profiles.py` | `ProfileManager(service_name)` — keyring-backed named LLM profile CRUD |
 | `protocol.py` | `LLMProvider` Protocol — optional duck-type interface for provider implementations |
 | `base.py` | `BaseLLMProvider` — shared HTTP-based chat and command generation with hook methods for subclassing |
+| `tool_loop.py` | `run_tool_loop()` / `resume_execution()` — multi-round tool-calling loop with HITL confirmation gating (READ/WRITE/DESTRUCTIVE); supports optional `get_tool_level_fn` callback for LLM-tool permission resolution outside the CLI registry |
 | `utils.py` | `resolve_base_url()`, `parse_command_result()`, `build_messages()`, `normalize_messages()`, `validate_base_url()`, `response_error_detail()` |
 | `system_prompt.py` | `SystemPromptManager(directory, filename)` — file-based user-editable system prompt with auto-seed |
 

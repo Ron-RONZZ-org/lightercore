@@ -69,11 +69,12 @@ lightercore/
 │       ├── dev_helpers.py      ← Shared dev-server CLI infrastructure (--data-dir, --seed, temp dir, env vars)
 │       ├── llm/
 │       │   ├── __init__.py
-│       │   ├── config.py       ← ProviderConfig, keyring helpers, active config CRUD
-│       │   ├── profiles.py     ← ProfileManager (named LLM profiles)
-│       │   ├── protocol.py     ← LLMProvider Protocol
-│       │   ├── base.py         ← BaseLLMProvider (shared chat + command generation)
-│       │   └── utils.py        ← URL resolution, message parsing, DeepSeek compat
+│   │   ├── config.py       ← ProviderConfig, keyring helpers, active config CRUD
+│   │   ├── profiles.py     ← ProfileManager (named LLM profiles)
+│   │   ├── protocol.py     ← LLMProvider Protocol
+│   │   ├── base.py         ← BaseLLMProvider (shared chat + command generation)
+│   │   ├── tool_loop.py    ← run_tool_loop / resume_execution — multi-round HITL loop with optional get_tool_level_fn callback
+│   │   └── utils.py        ← URL resolution, message parsing, DeepSeek compat
 │       ├── system_prompt.py    ← SystemPromptManager (file-based, auto-seed)
 │       └── prompt_files.py     ← PromptFilesManager (shipped prompt file registry, diff detection, reset/save)
 ├── docs/

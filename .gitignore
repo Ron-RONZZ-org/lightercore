@@ -33,3 +33,6 @@ Thumbs.db
 
 # uv
 uv.lock
+
+# Editor
+.opencode/

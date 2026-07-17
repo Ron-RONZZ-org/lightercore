@@ -41,6 +41,35 @@ _pending_executions: dict[str, dict] = {}
 # ── Helpers ────────────────────────────────────────────────────────────────
 
 
+def _get_tool_level(
+    path: str,
+    get_tool_level_fn: Any,
+    get_handler_metadata_fn: Any,
+    get_command_level_fn: Any,
+) -> PermissionLevel | None:
+    """Resolve the permission level for a tool path.
+
+    Checks *get_tool_level_fn* first (for LLM tools registered outside the
+    CLI command registry), then falls back to the CLI command registry.
+    Returns ``None`` when no permission information is available (tools are
+    treated as READ-level and execute without confirmation).
+
+    Args:
+        path: Dot-separated tool path (e.g. ``"email.find"``).
+        get_tool_level_fn: Optional callback for LLM-tool permission lookup.
+        get_handler_metadata_fn: CLI command registry metadata lookup.
+        get_command_level_fn: CLI command registry permission-level lookup.
+
+    Returns:
+        The resolved :class:`PermissionLevel`, or ``None`` if unknown.
+    """
+    if get_tool_level_fn:
+        return get_tool_level_fn(path)
+    if get_handler_metadata_fn(path) is not None:
+        return get_command_level_fn(path)
+    return None
+
+
 def tc_path(tc: ToolCall) -> tuple[str, dict[str, str]]:
     """Extract command path and flags from a tool call.
 
@@ -98,6 +127,7 @@ async def run_tool_loop(
     get_handler_metadata_fn: Any,
     get_command_level_fn: Any,
     max_rounds: int = 20,
+    get_tool_level_fn: Any = None,
 ) -> str | dict | None:
     """Run the multi-round tool-calling loop.
 
@@ -115,6 +145,10 @@ async def run_tool_loop(
         get_handler_metadata_fn: Callable ``(path: str) -> dict | None``.
         get_command_level_fn: Callable ``(path: str) -> PermissionLevel | None``.
         max_rounds: Maximum tool-calling rounds before giving up.
+        get_tool_level_fn: Optional callable ``(path: str) -> PermissionLevel | None``.
+            When provided, takes priority over the CLI command registry for
+            permission resolution. Used for LLM tools that aren't registered
+            as CLI commands.  ``None`` (default) means use only the CLI registry.
 
     Returns:
         - ``str`` — final answer on success.
@@ -162,7 +196,7 @@ async def run_tool_loop(
         write_batch: list[dict] = []
         for tc_idx, tc in enumerate(result.tool_calls):
             path, flags = tc_path(tc)
-            level = get_command_level_fn(path) if get_handler_metadata_fn(path) is not None else None
+            level = _get_tool_level(path, get_tool_level_fn, get_handler_metadata_fn, get_command_level_fn)
 
             # Collect write+ tools for user review.  READ tools execute
             # immediately without confirmation.
@@ -212,6 +246,7 @@ async def run_tool_loop(
                 "tools": tools,
                 "name": name,
                 "write_paths": {tuple(w["tokens"]): w for w in write_batch},
+                "get_tool_level_fn": get_tool_level_fn,
             }
 
             return {
@@ -276,6 +311,7 @@ async def resume_execution(
     dispatch_fn: Any,
     get_handler_metadata_fn: Any,
     get_command_level_fn: Any,
+    get_tool_level_fn: Any = None,
 ) -> str | dict | None:
     """Resume a paused execution after user confirmation.
 
@@ -294,6 +330,9 @@ async def resume_execution(
         dispatch_fn: Command dispatch callable.
         get_handler_metadata_fn: Registry metadata lookup.
         get_command_level_fn: Registry permission-level lookup.
+        get_tool_level_fn: Optional callable ``(path: str) -> PermissionLevel | None``.
+            See :func:`run_tool_loop` for details. Falls back to the value stored
+            in the pending session state if not explicitly provided.
 
     Returns:
         Same as :func:`run_tool_loop`.
@@ -307,6 +346,9 @@ async def resume_execution(
     tools: list[dict] = state["tools"]
     name: str = state["name"]
     write_paths: dict = state["write_paths"]
+    # Use explicit param if provided, otherwise fall back to stored state
+    if get_tool_level_fn is None:
+        get_tool_level_fn = state.get("get_tool_level_fn")
 
     # Resolve decisions
     if decisions is not None:
@@ -318,7 +360,7 @@ async def resume_execution(
         write_indices = set()
         for idx, tc in enumerate(tool_calls):
             path, _ = tc_path(ToolCall(id=tc.get("id", ""), function=tc.get("function", {})))
-            level = get_command_level_fn(path) if get_handler_metadata_fn(path) is not None else None
+            level = _get_tool_level(path, get_tool_level_fn, get_handler_metadata_fn, get_command_level_fn)
             if level is not None and level >= PermissionLevel.WRITE:
                 write_indices.add(idx)
         resolved = {idx: confirmed for idx in write_indices}
@@ -337,7 +379,7 @@ async def resume_execution(
             function=tc_data.get("function", {}),
         )
         path, flags = tc_path(tc)
-        level = get_command_level_fn(path) if get_handler_metadata_fn(path) is not None else None
+        level = _get_tool_level(path, get_tool_level_fn, get_handler_metadata_fn, get_command_level_fn)
 
         if level is not None and level >= PermissionLevel.WRITE:
             approved = resolved.get(idx, False)
@@ -378,6 +420,7 @@ async def resume_execution(
         dispatch_fn=dispatch_fn,
         get_handler_metadata_fn=get_handler_metadata_fn,
         get_command_level_fn=get_command_level_fn,
+        get_tool_level_fn=get_tool_level_fn,
     )
 
 
@@ -424,6 +467,7 @@ def _inject_feedback_summary(
 
 __all__ = [
     "_format_command_str",
+    "_get_tool_level",
     "_inject_feedback_summary",
     "_pending_executions",
     "_resolve_feedback",
