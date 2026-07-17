@@ -589,3 +589,52 @@ class TestResumeExecutionGetToolLevelFn:
         # The explicit READ-level fn changes the tool to READ, which is
         # skipped on resume (READ tools already executed in initial loop).
         dispatch.assert_not_called()
+
+    async def test_resume_confirmed_true_uses_get_tool_level_fn(self):
+        """confirmed=True with get_tool_level_fn stored dispatches WRITE tool."""
+        mock_provider = MagicMock()
+        mock_provider.chat_with_tools = AsyncMock(return_value=ChatResult(content="Done."))
+        dispatch = MagicMock(return_value={"status": "ok"})
+
+        session_id = self._make_session("email.send", tool_level=PermissionLevel.WRITE)
+
+        with patch(
+            "lightercore.llm.tool_loop.run_tool_loop",
+            new_callable=AsyncMock,
+            return_value="Done.",
+        ):
+            await resume_execution(
+                session_id=session_id,
+                confirmed=True,  # blanket approve
+                provider=mock_provider,
+                dispatch_fn=dispatch,
+                get_handler_metadata_fn=lambda p: None,
+                get_command_level_fn=lambda p: None,
+                # get_tool_level_fn NOT passed — uses stored value
+            )
+
+        dispatch.assert_called_once()
+
+    async def test_resume_confirmed_false_uses_get_tool_level_fn(self):
+        """confirmed=False with get_tool_level_fn stored blocks WRITE tool."""
+        mock_provider = MagicMock()
+        mock_provider.chat_with_tools = AsyncMock(return_value=ChatResult(content="Skipped."))
+        dispatch = MagicMock(return_value={"status": "ok"})
+
+        session_id = self._make_session("email.send", tool_level=PermissionLevel.WRITE)
+
+        with patch(
+            "lightercore.llm.tool_loop.run_tool_loop",
+            new_callable=AsyncMock,
+            return_value="Skipped.",
+        ):
+            await resume_execution(
+                session_id=session_id,
+                confirmed=False,  # blanket reject
+                provider=mock_provider,
+                dispatch_fn=dispatch,
+                get_handler_metadata_fn=lambda p: None,
+                get_command_level_fn=lambda p: None,
+            )
+
+        dispatch.assert_not_called()
