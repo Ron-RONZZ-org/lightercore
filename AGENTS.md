@@ -25,6 +25,7 @@ Context resolution order (highest priority first):
 - **CRUD**: Generic create/read/update/delete with UUID prefix matching and soft-delete
 - **Backup**: Multi-strategy 7z-backed backup/restore with export/import and external sync
 - **LLM**: Shared LLM infrastructure — provider config, keyring persistence, profile CRUD, unified chat/command-generation, system prompt management
+- **Cowrite**: Shared co-writing engine and cascade style loader for LLM-assisted form editing — ``cowrite/engine.py`` provides protocol prompt, diff computation, and response parsing; ``cowrite/style.py`` provides generic cascade style loading (general + per-domain). 3 Svelte 5 components (``CowriteEngine.svelte.js``, ``CowriteButton.svelte``, ``CowritePanel.svelte``) provide the frontend state machine and UI.
 - **Svelte UI**: Shared Svelte 5 components and stores — reactive stores (bannerStore with persistent support, keyboardShortcuts, dirtyFormStore, tabStore), utility functions (listTabFormat, listTabSelection, conversationUtils), and UI components (BannerContainer, ConfirmDialog). Published as a separate npm package (`@lightercore/ui`) from `web/`.
 - **Prompt Files**: Registry for shipped prompt files — ``PromptFilesManager`` provides ``list_all``, ``get_content``, ``is_modified``, ``reset``, ``save``, ``modified_count``, and ``reset_all`` for discovering, inspecting, comparing, and resetting app prompt files.
 
@@ -75,6 +76,10 @@ lightercore/
 │   │   ├── base.py         ← BaseLLMProvider (shared chat + command generation)
 │   │   ├── tool_loop.py    ← run_tool_loop / resume_execution — multi-round HITL loop with optional get_tool_level_fn callback
 │   │   └── utils.py        ← URL resolution, message parsing, DeepSeek compat
+│       ├── cowrite/
+│       │   ├── __init__.py     ← Re-exports engine and style
+│       │   ├── engine.py       ← Co-writing engine: protocol prompt, LLM response parsing, diff computation
+│       │   └── style.py        ← Generic cascade style loader (general + per-domain files)
 │       ├── system_prompt.py    ← SystemPromptManager (file-based, auto-seed)
 │       └── prompt_files.py     ← PromptFilesManager (shipped prompt file registry, diff detection, reset/save)
 ├── docs/
@@ -93,7 +98,9 @@ lightercore/
 │   ├── test_llm_utils.py
 │   ├── test_llm_base.py
 │   ├── test_system_prompt.py
-│   └── test_prompt_files.py
+│   ├── test_prompt_files.py
+│   ├── test_cowrite_engine.py  ← Engine tests: response parsing, diff computation, LLM integration
+│   └── test_cowrite_style.py   ← Style cascade tests: loading, auto-seed, error handling
 └── web/                           ← Svelte UI component package (@lightercore/ui)
     ├── package.json               # npm package with exports field
     ├── vitest.config.js           # Vitest with @sveltejs/vite-plugin-svelte
@@ -109,6 +116,11 @@ lightercore/
         ├── conversationUtils.js
         ├── BannerContainer.svelte
         ├── ConfirmDialog.svelte
+        ├── cowrite/                   # Co-writing UI: state machine, button, diff panel
+        │   ├── CowriteEngine.svelte.js
+        │   ├── CowriteButton.svelte
+        │   ├── CowritePanel.svelte
+        │   └── index.js
         └── *.test.js              (80+ tests)
 ```
 
