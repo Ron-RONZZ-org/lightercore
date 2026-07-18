@@ -1,4 +1,4 @@
-"""LLM provider and profile management.
+"""LLM provider, profile management, and tool registry.
 
 Sub-package of lightercore providing the shared LLM infrastructure
 used by both lighterbird and semantika:
@@ -9,6 +9,7 @@ used by both lighterbird and semantika:
 - :mod:`~lightercore.llm.base` — :class:`BaseLLMProvider`
 - :mod:`~lightercore.llm.utils` — URL resolution, message parsing
 - :mod:`~lightercore.llm.tool_loop` — multi-round tool-calling loop with HITL
+- :mod:`~lightercore.llm.tools` — shared ``@llm_tool()`` decorator and registry
 """
 
 from lightercore.llm.base import (
@@ -36,6 +37,16 @@ from lightercore.llm.tool_loop import (
     sanitize_tool_result,
     tc_path,
 )
+from lightercore.llm.tools import (
+    _llm_registry,
+    dispatch_llm_tool,
+    get_llm_tool_level,
+    get_llm_tool_metadata,
+    get_llm_tool_names,
+    get_llm_tools,
+    is_llm_tool,
+    llm_tool,
+)
 
 __all__ = [
     "BaseLLMProvider",
@@ -44,12 +55,20 @@ __all__ = [
     "ProfileManager",
     "ProviderConfig",
     "ToolCall",
+    "_llm_registry",
     "_pending_executions",
     "clear_active_config",
     "defs_to_tools",
+    "dispatch_llm_tool",
+    "get_llm_tool_level",
+    "get_llm_tool_metadata",
+    "get_llm_tool_names",
+    "get_llm_tools",
+    "is_llm_tool",
     "keyring_delete",
     "keyring_get",
     "keyring_set",
+    "llm_tool",
     "load_active_config",
     "resume_execution",
     "run_tool_loop",
