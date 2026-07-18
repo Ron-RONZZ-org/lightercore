@@ -48,6 +48,13 @@ from lightercore.llm.tools import (
     llm_tool,
 )
 
+# Re-export for convenience so apps can do:
+#   from lightercore.llm import llm_tool, get_llm_tools, ...
+# or import individual tool handlers:
+#   from lightercore.llm import llm_system_now
+from lightercore.llm.tools import system as _lightercore_tools_system  # noqa: F401
+from lightercore.llm.tools.system import llm_system_now
+
 __all__ = [
     "BaseLLMProvider",
     "ChatResult",
@@ -68,6 +75,7 @@ __all__ = [
     "keyring_delete",
     "keyring_get",
     "keyring_set",
+    "llm_system_now",
     "llm_tool",
     "load_active_config",
     "resume_execution",

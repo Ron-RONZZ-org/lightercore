@@ -249,6 +249,11 @@ def get_llm_tool_metadata(path: str) -> dict | None:
     return _llm_registry.get(path)
 
 
+# NOTE: Bundled tool modules (system.py etc.) are NOT eagerly imported here.
+# Each app triggers registration by importing from its own system.py,
+# which re-exports from lightercore.llm.tools.system.  This preserves
+# the lazy-import pattern that lighterbird's tests rely on.
+
 __all__ = [
     "_llm_registry",
     "dispatch_llm_tool",
