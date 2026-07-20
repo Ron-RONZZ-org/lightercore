@@ -1,13 +1,18 @@
 """Core co-writing engine — protocol prompt, session, diff computation.
 
 This module contains the PROTOCOL LAYER of the co-writing prompt.
-It is NEVER user-editable. See ``style.py`` for the user-editable style
-layer, and call ``cowrite()`` from the app's route handler.
+It is NEVER user-editable. User customisation (tone, conventions, rules)
+should be injected via ``style_content`` and the ``context`` parameter.
+
+Apps may also enforce structured output at the API level by wrapping
+``chat_fn`` to pass ``response_format`` to ``provider.chat()`` — see
+``semantika.server.routes.cowrite`` for an example.
 
 The app is responsible for:
 1. Providing a chat function (``chat_fn``) — typically ``provider.chat``
    from a configured :class:`~lightercore.llm.base.BaseLLMProvider`.
-2. Pre-loading style content via ``load_cowrite_style()`` from ``style.py``.
+2. Providing user style content (``style_content``) — typically loaded
+   from the app's user style file (e.g. AGENTS.md).
 3. Gathering app-specific context (writing samples, etc.) if desired.
 """
 
@@ -25,34 +30,16 @@ logger = logging.getLogger(__name__)
 
 COWRITE_PROTOCOL_PROMPT = """You are a writing assistant. Your job is to help the user improve, rewrite, or expand text they are composing.
 
-CRITICAL RULES — Read carefully. Violating these breaks the feature:
+Rules:
+1. Return the COMPLETE revised text for EVERY field — not a summary of changes.
+2. Preserve all original content unless the user asks you to change it.
+3. If you cannot improve anything meaningful, return the original text unchanged.
 
-1. You MUST return the COMPLETE revised text for EVERY field, not just the changes or a summary.
-2. Return ONLY a valid JSON object. No markdown, no explanation, no extra text.
-3. The JSON keys MUST be the exact field names from the request. Do not add or remove fields.
-4. Each field value must be the FULL revised text — not truncated, not a description of changes.
-5. Preserve all original content unless the user asks you to change it.
-6. If you cannot improve anything meaningful, return the original text unchanged.
-
-Examples of what NOT to do:
-  BAD:  {"body": "fixed typo: ths \u2192 this"}            \u2190 description, not full text
-  BAD:  {"body": "This is the first paragraph"}         \u2190 truncated
-  BAD:  {"subject": "..."}                               \u2190 missing "body" field
-  BAD:  Here is the revised text: {"body": "..."}        \u2190 extra text outside JSON
-
-GOOD: {"subject": "Complete revised subject", "body": "Complete revised body text including all original content with improvements applied."}
-
-RESPONSE FORMAT (JSON only):
-{
-  "field_name_1": "Complete revised text for field 1",
-  "field_name_2": "Complete revised text for field 2"
-}
-
-WRITING SAMPLES \u2014 You may receive ``writing_samples`` in the ``context``
+WRITING SAMPLES — You may receive ``writing_samples`` in the ``context``
 section of the request.  These are real examples of the user's past
 writing.  Use them to match the user's personal style: tone, sentence
 structure, vocabulary, formality level, paragraph length, and typical
-sign-offs.  Do NOT copy content from the samples \u2014 draw style
+sign-offs.  Do NOT copy content from the samples — draw style
 inspiration only.
 """
 

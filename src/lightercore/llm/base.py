@@ -238,6 +238,7 @@ class BaseLLMProvider:
         stream: bool = False,
         tools: list[dict] | None = None,
         tool_choice: str | None = None,
+        response_format: dict | None = None,
     ) -> dict[str, Any]:
         """Build the JSON payload for the chat completion request.
 
@@ -247,6 +248,9 @@ class BaseLLMProvider:
             tools: OpenAI-compatible tool definitions (function calling).
             tool_choice: ``"auto"``, ``"none"``, ``"required"``, or
                         ``{"type": "function", "function": {"name": "..."}}``.
+            response_format: Structured output configuration, e.g.
+                ``{"type": "json_schema", "json_schema": {...}}``.
+                Passed as-is to the API.  Not supported when ``stream=True``.
         """
         payload: dict[str, Any] = {
             "model": self.model,
@@ -259,6 +263,8 @@ class BaseLLMProvider:
             payload["tools"] = tools
         if tool_choice:
             payload["tool_choice"] = tool_choice
+        if response_format and not stream:
+            payload["response_format"] = response_format
         return payload
 
     def _chat_url(self) -> str:
@@ -355,12 +361,15 @@ class BaseLLMProvider:
         messages: list[dict],
         *,
         stream: bool = False,
+        response_format: dict | None = None,
     ) -> str | AsyncIterator[str]:
         """Send a chat completion request.
 
         Args:
             messages: List of message dicts.
             stream: If ``True``, return an async iterator of content tokens.
+            response_format: Structured output configuration, e.g.
+                ``{"type": "json_schema", "json_schema": {...}}``.
 
         Returns:
             Full response string (non-streaming) or async iterator (streaming).
@@ -372,7 +381,9 @@ class BaseLLMProvider:
             raise AIError("LLM provider not configured.")
 
         headers = self._build_headers()
-        payload = self._build_payload(messages, stream=stream)
+        payload = self._build_payload(
+            messages, stream=stream, response_format=response_format,
+        )
         url = self._chat_url()
 
         if stream:
