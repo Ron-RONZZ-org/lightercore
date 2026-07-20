@@ -5,7 +5,9 @@ protection against accidental deletion.
 
 Each consuming application should call ``set_app_name()`` during startup
 so that data/config/cache/state directories use the correct app name.
-Defaults to ``"lighterbird"`` for backward compatibility.
+Defaults to ``"unknownlighterapp"`` so that apps that forget to call
+``set_app_name()`` get an obvious wrong-directory signal rather than silently
+polluting another app's namespace.
 
 Usage::
 
@@ -24,7 +26,7 @@ _LIGHTERCORE_DIR_ENV = "LIGHTERCORE_DIR"
 
 # App name used for default path fallback (e.g. ~/.local/share/<app_name>).
 # Each consuming app should call set_app_name() early during import.
-_app_name: str = "lighterbird"
+_app_name: str = "unknownlighterapp"
 
 
 def set_app_name(name: str) -> None:
@@ -35,7 +37,7 @@ def set_app_name(name: str) -> None:
     fallback (i.e. when no env vars are set).
 
     Args:
-        name: Lowercase app name, e.g. ``"semantika"`` or ``"lighterbird"``.
+        name: Lowercase app name, e.g. ``"ronzzdoi"`` or ``"semantika"``.
     """
     global _app_name
     _app_name = name

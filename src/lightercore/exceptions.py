@@ -1,12 +1,12 @@
 """Base exception hierarchy for the lightercore ecosystem.
 
-All custom exceptions inherit from :class:`LighterbirdError` so that
+All custom exceptions inherit from :class:`LighterError` so that
 client code can catch a single base class for all domain errors.
 
 Usage::
 
     from lightercore.exceptions import (
-        LighterbirdError, ConfigurationError, DatabaseError,
+        LighterError, ConfigurationError, DatabaseError,
         AIError, ProtectedPathError,
     )
 """
@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 
 
-class LighterbirdError(Exception):
+class LighterError(Exception):
     """Base exception for all lightercore-based applications."""
 
     def __init__(self, message: str, **kwargs: Any) -> None:
@@ -26,31 +26,31 @@ class LighterbirdError(Exception):
         self.details = kwargs
 
 
-class ConfigurationError(LighterbirdError):
+class ConfigurationError(LighterError):
     """Invalid or missing configuration."""
 
 
-class DatabaseError(LighterbirdError):
+class DatabaseError(LighterError):
     """Database operation failed."""
 
 
-class DataError(LighterbirdError):
+class DataError(LighterError):
     """Data-layer errors (deleted entries, bad payloads, etc.)."""
 
 
-class AuthenticationError(LighterbirdError):
+class AuthenticationError(LighterError):
     """Credential or authentication failure."""
 
 
-class SyncError(LighterbirdError):
+class SyncError(LighterError):
     """Sync operation failed (IMAP, CalDAV, etc.)."""
 
 
-class AIError(LighterbirdError):
+class AIError(LighterError):
     """LLM provider call failed."""
 
 
-class AmbiguousIDError(LighterbirdError):
+class AmbiguousIDError(LighterError):
     """Raised when an ID prefix matches multiple entities.
 
     Useful for CLI interaction — the caller can present the matches
@@ -65,7 +65,7 @@ class AmbiguousIDError(LighterbirdError):
         self.matches: list[dict] = matches or []
 
 
-class ProtectedPathError(LighterbirdError):
+class ProtectedPathError(LighterError):
     """Raised when attempting to delete a protected directory.
 
     A directory is *protected* when it (or an ancestor) contains a
