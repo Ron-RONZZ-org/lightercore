@@ -58,6 +58,33 @@ class TestBaseLLMProviderInit:
         assert p.model == "llama3.2"
 
 
+# ── _build_payload ────────────────────────────────────────────────────────────
+
+
+class TestBuildPayload:
+    def test_default_no_response_format(self) -> None:
+        p = BaseLLMProvider(_config(api_key="sk-test"))
+        payload = p._build_payload([{"role": "user", "content": "hi"}])
+        assert "response_format" not in payload
+
+    def test_response_format_included(self) -> None:
+        p = BaseLLMProvider(_config(api_key="sk-test"))
+        schema = {"type": "json_schema", "json_schema": {"name": "test", "strict": True, "schema": {}}}
+        payload = p._build_payload([{"role": "user", "content": "hi"}], response_format=schema)
+        assert payload["response_format"] == schema
+
+    def test_response_format_not_included_when_streaming(self) -> None:
+        """response_format should NOT be sent when stream=True (most APIs reject it)."""
+        p = BaseLLMProvider(_config(api_key="sk-test"))
+        schema = {"type": "json_schema", "json_schema": {"name": "test", "strict": True, "schema": {}}}
+        payload = p._build_payload(
+            [{"role": "user", "content": "hi"}],
+            stream=True,
+            response_format=schema,
+        )
+        assert "response_format" not in payload
+
+
 # ── Chat (non-streaming) ────────────────────────────────────────────────────
 
 
@@ -114,6 +141,26 @@ class TestChat:
         p = BaseLLMProvider(_config(api_key="sk-test"))
         with pytest.raises(AIError, match="No response"):
             await p.chat([{"role": "user", "content": "Hi"}])
+
+    @patch("httpx.AsyncClient")
+    async def test_response_format_passed_to_post(self, mock_client_cls: MagicMock) -> None:
+        """When response_format is passed to chat(), it appears in the POST payload."""
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.is_error = False
+        mock_response.json.return_value = {"choices": [{"message": {"content": "OK"}}]}
+
+        mock_instance = AsyncMock()
+        mock_instance.__aenter__.return_value = mock_instance
+        mock_instance.post.return_value = mock_response
+        mock_client_cls.return_value = mock_instance
+
+        p = BaseLLMProvider(_config(api_key="sk-test"))
+        schema = {"type": "json_object"}
+        await p.chat([{"role": "user", "content": "Hi"}], response_format=schema)
+
+        call_kwargs = mock_instance.post.call_args[1]
+        payload = call_kwargs["json"]
+        assert payload["response_format"] == schema
 
     @patch("httpx.AsyncClient")
     async def test_deepseek_normalizes_role_type(self, mock_client: MagicMock) -> None:
