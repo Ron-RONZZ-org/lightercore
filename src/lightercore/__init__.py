@@ -6,9 +6,9 @@ backup/restore, CRUD abstraction, LLM provider, and exception hierarchy.
 
 Usage::
 
-    from lightercore.db import LighterbirdDB
+    from lightercore.db import LighterDB
     from lightercore.paths import data_dir
-    from lightercore.exceptions import LighterbirdError
+    from lightercore.exceptions import LighterError
 """
 
 from lightercore import db, paths, exceptions, backup, crud, permissions, llm, system_prompt, prompt_commands, prompt_files, dev_helpers, text_utils

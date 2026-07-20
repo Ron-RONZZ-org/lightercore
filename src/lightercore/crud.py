@@ -16,7 +16,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from lightercore.db import LighterbirdDB
+from lightercore.db import LighterDB
 
 
 def now() -> str:
@@ -29,7 +29,7 @@ class CRUDService:
 
     def __init__(
         self,
-        db: LighterbirdDB,
+        db: LighterDB,
         table: str,
         trash_table: str | None = None,
         pk_column: str = "uuid",

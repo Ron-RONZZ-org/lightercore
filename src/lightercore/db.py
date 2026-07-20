@@ -1,15 +1,15 @@
 """SQLite database wrapper with WAL mode and per-thread connection caching.
 
-Best-of-both-worlds merge:
-- Lighterbird DB: richer query methods (init_schema, table_exists, get_pragma_table_info),
-  WAL checkpoint on init, auto-commit on execute(), mkdir on init
-- Semantika DB: backup() method using SQLite online backup API
+Merges the richer query methods from lighterbird's DB layer
+(init_schema, table_exists, get_pragma_table_info, WAL checkpoint,
+auto-commit, auto-mkdir) with semantika's backup() method using
+SQLite online backup API.
 
 Usage::
 
-    from lightercore.db import LighterbirdDB
+    from lightercore.db import LighterDB
 
-    db = LighterbirdDB(path)
+    db = LighterDB(path)
     db.init_schema({"items": "CREATE TABLE items (uuid TEXT PRIMARY KEY, name TEXT)"})
     result = db.execute("SELECT * FROM items WHERE uuid LIKE ?", ("abc%",))
 """
@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Any
 
 
-class LighterbirdDB:
+class LighterDB:
     """Thread-safe SQLite database with WAL mode and per-thread connections.
 
     Connections are cached per-thread via ``threading.local``.
@@ -36,7 +36,7 @@ class LighterbirdDB:
     and reused for subsequent queries.
 
     Connections are automatically closed via ``weakref.finalize`` when
-    the ``LighterbirdDB`` instance is garbage-collected.  This prevents
+    the ``LighterDB`` instance is garbage-collected.  This prevents
     ``ResourceWarning: unclosed database`` in long-running processes
     and test suites.  For connections that live on a different thread
     (where the finalizer cannot reach them), the per-thread cache is
@@ -61,7 +61,7 @@ class LighterbirdDB:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._after_connect = after_connect
         self._local = threading.local()
-        weakref.finalize(self, LighterbirdDB.close, self)
+        weakref.finalize(self, LighterDB.close, self)
 
     # ── Connection management ──────────────────────────────────────────
 
@@ -121,7 +121,7 @@ class LighterbirdDB:
         """Context manager yielding a connection with auto-commit/rollback."""
 
         class _TransactionContext:
-            def __init__(self, db: LighterbirdDB):
+            def __init__(self, db: LighterDB):
                 self.db = db
 
             def __enter__(self):
@@ -169,6 +169,63 @@ class LighterbirdDB:
             "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
             (name,),
         ) is not None
+
+    # ── Migrations ──────────────────────────────────────────────────────
+
+    def migrate(self, migrations: list[tuple[int, str]]) -> None:
+        """Apply pending schema migrations in forward-only order.
+
+        Each migration is wrapped in its own transaction so that a
+        partially-applied migration (e.g. due to a crash) does not
+        leave the database in an inconsistent state.  If a migration
+        fails, the transaction is rolled back and the exception is
+        re-raised; subsequent migrations are *not* attempted.
+
+        The current schema version is stored in ``PRAGMA user_version``.
+
+        Args:
+            migrations: Ordered list of ``(version, sql)`` tuples.
+                Version ``1`` should create the initial schema (or be
+                the first diff).  Each version must be strictly greater
+                than the previous one.
+
+        Raises:
+            ValueError: If migrations are not in strictly ascending
+                version order or if they start with version ``0``.
+            sqlite3.DatabaseError: If a migration SQL statement fails.
+
+        Usage::
+
+            MIGRATIONS = [
+                (1, "CREATE TABLE items (uuid TEXT PRIMARY KEY, name TEXT)"),
+                (2, "ALTER TABLE items ADD COLUMN description TEXT"),
+            ]
+            db.migrate(MIGRATIONS)
+        """
+        if not migrations:
+            return
+
+        # Validate ordering
+        versions = [v for v, _ in migrations]
+        if versions != sorted(set(versions)):
+            raise ValueError(
+                f"Migrations must be in strictly ascending order "
+                f"with no duplicates. Got versions: {versions}"
+            )
+        if versions[0] < 1:
+            raise ValueError(
+                f"Migration versions must start at 1 or higher. "
+                f"Got version {versions[0]}"
+            )
+
+        row = self.execute_one("PRAGMA user_version")
+        current = row["user_version"] if row else 0
+
+        for version, sql in migrations:
+            if version > current:
+                with self.transaction() as conn:
+                    conn.executescript(sql)
+                    conn.execute(f"PRAGMA user_version = {version}")
 
     # ── Backup ─────────────────────────────────────────────────────────
 
