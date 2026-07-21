@@ -2,7 +2,10 @@
 
 Provides the foundational building blocks used by both **lighterbird** (PIM)
 and **semantika** (knowledge graph): database management, path resolution,
-backup/restore, CRUD abstraction, LLM provider, and exception hierarchy.
+backup/restore, CRUD abstraction, and exception hierarchy.
+
+LLM provider infrastructure (llm/, cowrite/, system_prompt, prompt_commands,
+prompt_files) has been extracted to the ``lighterllm`` package.
 
 Usage::
 
@@ -11,11 +14,11 @@ Usage::
     from lightercore.exceptions import LighterError
 """
 
-from lightercore import db, paths, exceptions, backup, crud, permissions, llm, system_prompt, prompt_commands, prompt_files, dev_helpers, text_utils
+from lightercore import db, paths, exceptions, backup, crud, permissions, dev_helpers, text_utils
 from lightercore.paths import set_app_name
 
 __all__ = [
     "db", "paths", "exceptions", "backup", "crud", "permissions",
-    "llm", "system_prompt", "prompt_commands", "prompt_files", "dev_helpers", "text_utils",
+    "dev_helpers", "text_utils",
     "set_app_name",
 ]

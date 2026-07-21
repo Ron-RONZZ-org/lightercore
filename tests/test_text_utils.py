@@ -1,8 +1,9 @@
-"""Tests for lightercore.text_utils — sanitization, normalization, diacritic stripping."""
+"""Tests for lightercore.text_utils — sanitization, normalization, diacritic stripping, diffs."""
 
 from __future__ import annotations
 
 from lightercore.text_utils import (
+    compute_diffs,
     normalize_label_to_id,
     sanitize_node_id,
     strip_diacritics,
@@ -94,3 +95,60 @@ class TestStripDiacritics:
 
     def test_mixed_diacritics_and_ascii(self) -> None:
         assert strip_diacritics("Café naïve über cool") == "Cafe naive uber cool"
+
+
+# ── compute_diffs (moved from lightercore.cowrite.engine) ────────────────────
+
+
+class TestComputeDiffs:
+    """Character-level diff computation between original and revised text."""
+
+    def test_no_changes(self):
+        diffs = compute_diffs("Hello world", "Hello world")
+        assert len(diffs) == 1
+        assert diffs[0]["tag"] == "equal"
+
+    def test_simple_replacement(self):
+        diffs = compute_diffs("Hello world", "Hello there")
+        assert diffs[0]["tag"] == "equal"
+        assert diffs[0]["start_orig"] == 0
+        assert diffs[0]["end_orig"] == 6
+        replace_ops = [d for d in diffs if d["tag"] == "replace"]
+        assert len(replace_ops) >= 1
+
+    def test_insertion(self):
+        diffs = compute_diffs("Hello", "Hello world")
+        insert_ops = [d for d in diffs if d["tag"] == "insert"]
+        assert len(insert_ops) >= 1
+        assert insert_ops[0]["inserted"] == " world"
+
+    def test_deletion(self):
+        diffs = compute_diffs("Hello world", "Hello")
+        delete_ops = [d for d in diffs if d["tag"] == "delete"]
+        assert len(delete_ops) >= 1
+        assert delete_ops[0]["deleted"] == " world"
+
+    def test_complete_replacement(self):
+        diffs = compute_diffs("Old text", "New text")
+        replace_ops = [d for d in diffs if d["tag"] == "replace"]
+        assert any(d["deleted"] and d["inserted"] for d in replace_ops)
+
+    def test_empty_original(self):
+        diffs = compute_diffs("", "New content")
+        insert_ops = [d for d in diffs if d["tag"] == "insert"]
+        assert any(d["inserted"] == "New content" for d in insert_ops)
+
+    def test_empty_revised(self):
+        diffs = compute_diffs("Old content", "")
+        delete_ops = [d for d in diffs if d["tag"] == "delete"]
+        assert any(d["deleted"] == "Old content" for d in delete_ops)
+
+    def test_diffs_contain_position_info(self):
+        diffs = compute_diffs("Hello world", "Hello there")
+        replace_ops = [d for d in diffs if d["tag"] == "replace"]
+        assert len(replace_ops) >= 1
+        op = replace_ops[0]
+        assert "start_orig" in op
+        assert "end_orig" in op
+        assert op["start_orig"] <= op["end_orig"]
+        assert op["start_orig"] == 6
