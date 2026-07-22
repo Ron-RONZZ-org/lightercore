@@ -1,25 +1,35 @@
 /**
  * List sort/filter state management — reusable across list tabs.
  *
- * Provides reactive sort state (sort column + direction toggle) and
- * filter state (visibility toggles for item categories).
+ * Supports two interaction patterns:
+ *
+ * **Mode cycling** (semantika-style): cycle through predefined sort modes
+ * (column + direction pairs) via ``cycle()``.
+ *
+ * **Column toggle** (ronzzdoi-style): click any column header to sort by
+ * that column; click again to toggle direction via ``toggleColumn(col)``.
+ *
+ * The two patterns share the same ``comparator`` — derived lists in either
+ * pattern use ``items.toSorted(sort.comparator)``.
  *
  * Usage:
  * ```js
  *   import { createSortState, createFilterState } from "./listSort.svelte.js";
  *
- *   let sort = createSortState(["created_at", "node_id"]);
- *   let filter = createFilterState(["concept", "photo", "video"]);
+ *   // Mode-cycling (default):
+ *   let sort = createSortState();
+ *   sort.cycle();
+ *   let displayItems = $derived(items.toSorted(sort.comparator));
  *
- *   // Derive sorted/filtered list:
- *   let displayItems = $derived(
- *     filter.apply(items).toSorted(sort.comparator)
- *   );
+ *   // Column-toggle:
+ *   let sort2 = createSortState();
+ *   sort2.toggleColumn("target_url");
+ *   let displayItems2 = $derived(items.toSorted(sort2.comparator));
  * ```
  */
 
 /**
- * Available sort modes for list tabs.
+ * Default sort modes for the mode-cycling pattern.
  * Each entry: { column, label, direction, icon }
  */
 export const SORT_MODES = [
@@ -30,51 +40,96 @@ export const SORT_MODES = [
 ];
 
 /**
- * Create reactive sort state that cycles through sort modes.
+ * Create reactive sort state.
  *
  * @param {string} initialColumn - Starting sort column (default "created_at")
  * @param {string} initialDirection - Starting direction (default "desc")
- * @returns {{ readonly mode: object, cycle: () => void, comparator: (a, b) => number }}
+ * @returns {{
+ *   readonly mode: { column: string, label: string, direction: string, icon: string },
+ *   cycle: () => void,
+ *   toggleColumn: (col: string) => void,
+ *   comparator: (a: any, b: any) => number,
+ * }}
  */
 export function createSortState(initialColumn = "created_at", initialDirection = "desc") {
-  let currentIndex = $state(
+  // Internal column + direction — used directly by toggleColumn, derived into
+  // mode for cycle() callers.
+  let _column = $state(initialColumn);
+  let _direction = $state(initialDirection);
+  let _currentIndex = $state(
     SORT_MODES.findIndex(
-      (m) => m.column === initialColumn && m.direction === initialDirection,
+      (m) => m.column === _column && m.direction === _direction,
     ) || 0,
   );
 
-  /** Current sort mode object. */
-  let mode = $derived(SORT_MODES[currentIndex]);
+  /**
+   * Current mode — derived from the active column/direction.
+   * When the state matches one of the predefined SORT_MODES, that entry is
+   * returned (so cycle()-based callers get the correct label/icon). For
+   * dynamic columns set via toggleColumn, a synthetic mode is returned.
+   */
+  let mode = $derived.by(() => {
+    const match = SORT_MODES.find(
+      (m) => m.column === _column && m.direction === _direction,
+    );
+    if (match) return match;
+    return {
+      column: _column,
+      label: _column.replace(/_/g, " "),
+      direction: _direction,
+      icon: _direction === "asc" ? "↑" : "↓",
+    };
+  });
 
-  /** Cycle to the next sort mode. */
+  /** Cycle to the next predefined sort mode. */
   function cycle() {
-    currentIndex = (currentIndex + 1) % SORT_MODES.length;
+    const next = (_currentIndex + 1) % SORT_MODES.length;
+    _currentIndex = next;
+    _column = SORT_MODES[next].column;
+    _direction = SORT_MODES[next].direction;
+  }
+
+  /**
+   * Sort by *column*: first click sorts ascending, second click toggles direction.
+   * This is the column-header-click pattern — unlike cycle(), it lets the caller
+   * pick any column name at runtime (dynamic columns).
+   */
+  function toggleColumn(col) {
+    if (_column === col) {
+      _direction = _direction === "asc" ? "desc" : "asc";
+    } else {
+      _column = col;
+      _direction = "asc";
+    }
+    // Keep cycle index in sync for callers that mix both patterns
+    const matchIdx = SORT_MODES.findIndex(
+      (m) => m.column === _column && m.direction === _direction,
+    );
+    if (matchIdx >= 0) _currentIndex = matchIdx;
   }
 
   /**
    * Comparator function for `Array.toSorted()`.
-   * Sorts by the current mode's column and direction.
+   * Generic — handles any column, not just predefined modes.
+   * Compares locale-aware for strings, numeric for numbers.
    */
   function comparator(a, b) {
-    const col = mode.column;
-    let valA, valB;
-    if (col === "node_id") {
-      valA = (a.node_id || "").toLowerCase();
-      valB = (b.node_id || "").toLowerCase();
-    } else if (col === "created_at") {
-      valA = a.created_at || "";
-      valB = b.created_at || "";
+    const col = _column;
+    const valA = a[col];
+    const valB = b[col];
+    let cmp;
+    if (typeof valA === "number" && typeof valB === "number") {
+      cmp = valA - valB;
     } else {
-      valA = String(a[col] ?? "");
-      valB = String(b[col] ?? "");
+      cmp = String(valA ?? "").localeCompare(String(valB ?? ""));
     }
-    const cmp = valA < valB ? -1 : valA > valB ? 1 : 0;
-    return mode.direction === "desc" ? -cmp : cmp;
+    return _direction === "desc" ? -cmp : cmp;
   }
 
   return {
     get mode() { return mode; },
     cycle,
+    toggleColumn,
     comparator,
   };
 }
