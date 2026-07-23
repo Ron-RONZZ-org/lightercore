@@ -139,9 +139,11 @@ export const tabStore = {
     }
   },
 
-  update(id, data, title) {
+  update(id, data, title, idKey) {
     _tabs = _tabs.map((t) =>
-      t.id === id ? { ...t, data, ...(title !== undefined ? { title } : {}) } : t,
+      t.id === id
+        ? { ...t, data, ...(title !== undefined ? { title } : {}), ...(idKey !== undefined ? { idKey } : {}) }
+        : t,
     );
   },
 
