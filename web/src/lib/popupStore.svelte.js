@@ -129,7 +129,7 @@ export const popup = {
    * @param {string} title — loading message
    */
   showLoading(title) {
-    tabStore.open("loading", title, null, { closable: false });
+    tabStore.open("loading", title, null, { closable: true });
   },
 
   /** Close the active result tab (if closable). */
